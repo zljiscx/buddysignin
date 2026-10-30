@@ -40,7 +40,8 @@ from core import accounts, runner, webui      # noqa: E402  (.env 需先加载)
 
 def main():
     p = argparse.ArgumentParser(description="Buddy 签到管理台")
-    p.add_argument("--port", type=int, default=int(os.environ.get("PORT") or 18321))
+    p.add_argument("--port", type=int,
+                   default=int(os.environ.get("PORT") or os.environ.get("BUDDY_PORT") or 18321))
     p.add_argument("--host", default=os.environ.get("BUDDY_HOST") or "0.0.0.0")
     p.add_argument("--once", action="store_true", help="执行一轮后退出")
     p.add_argument("--no-web", action="store_true", help="不启动 Web")

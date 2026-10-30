@@ -122,7 +122,9 @@ python app.py --no-web         # 只跑调度
 python app.py --port 19000     # 换端口
 ```
 
-无第三方依赖，仅 Python 3.8+ 标准库。
+无第三方依赖，仅 Python 3.8+ 标准库。本地运行同样会读取根目录 `.env`
+（管理台密码、端口），与容器行为一致；想临时不校验密码，把 `.env` 里的
+`BUDDY_ADMIN_PASSWORD` 清空即可。
 
 ## 配置
 
