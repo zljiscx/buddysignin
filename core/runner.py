@@ -7,7 +7,7 @@ import threading
 import time
 
 import buddy_checkin as bc
-from core import accounts
+from core import accounts, settings
 
 _lock = threading.Lock()
 _state_lock = threading.Lock()
@@ -91,32 +91,78 @@ def _now():
     return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def scheduler_times(base_cfg):
-    return bc.parse_times(base_cfg)
+def scheduler_times():
+    """当前生效的自动执行时间点（每次调用都重新读设置，管理台改完即时生效）。"""
+    return settings.times()
+
+
+SCHED_PATH = os.path.join(bc.DATA_DIR, "scheduler_state.json")
+
+
+def _sched_load():
+    try:
+        with open(SCHED_PATH, encoding="utf-8") as f:
+            d = json.load(f) or {}
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _sched_save(d):
+    try:
+        os.makedirs(bc.DATA_DIR, exist_ok=True)
+        tmp = SCHED_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(d, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, SCHED_PATH)
+    except Exception:
+        pass
+
+
+def _tick(stop_event, log):
+    """检查一次时间点：当天该跑且没跑过的点就立刻跑一轮（含启动补跑）。"""
+    now = datetime.datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    st = _sched_load()
+    if st.get("date") != today:
+        st = {"date": today, "done": []}
+    done = [s for s in (st.get("done") or []) if isinstance(s, str)]
+
+    slots = ["%02d:%02d" % t for t in scheduler_times()]
+    hhmm = now.strftime("%H:%M")
+    pending = [s for s in slots if s <= hhmm and s not in done]
+
+    if not pending:
+        stop_event.wait(30)     # 30 秒轮询：设置改动、系统时间漂移都能跟上
+        return
+
+    label = "、".join(pending)
+    log("[调度] 到点 %s，开始执行" % label)
+    t0 = time.time()
+    try:
+        run_all()
+    except Exception as e:      # 单轮异常不能让调度线程死掉
+        log("[调度] 本轮异常：%s" % str(e)[:200])
+
+    st["date"] = today
+    st["done"] = sorted(set(done) | set(pending))
+    st["last_slot"] = label
+    st["last_run"] = _now()
+    _sched_save(st)
+    log("[调度] 本轮完成，用时 %.0f 秒；时间点 %s 记为当天已执行" % (time.time() - t0, label))
 
 
 def scheduler_loop(stop_event, log=print):
-    """常驻调度：每个时间点跑一轮所有账号，其余时间静默。"""
-    base_cfg = bc.load_config()
-    times = scheduler_times(base_cfg)
-    log("调度启动 | 每日时间点=%s" % ", ".join("%02d:%02d" % t for t in times))
+    """常驻调度：轮询时间点，每个点当天只跑一次；已完成的步骤由 run_once 内部幂等跳过。
+
+    与「定时启动」并存也安全：两种方式最终都落到 run_once 的当日门控上，
+    谁先成功就算完成，另一个只做补漏。
+    """
+    log("[调度] 启动 | 每日时间点=%s（来自管理台设置，改动即时生效）"
+        % ", ".join("%02d:%02d" % t for t in scheduler_times()))
     while not stop_event.is_set():
-        now = datetime.datetime.now()
-        target = None
-        for hm in times:
-            cand = now.replace(hour=hm[0], minute=hm[1], second=0, microsecond=0)
-            if cand > now:
-                target = cand
-                break
-        if target is None:
-            target = now.replace(hour=times[0][0], minute=times[0][1], second=0,
-                                 microsecond=0) + datetime.timedelta(days=1)
-        wait = max(1.0, (target - now).total_seconds())
-        log("下次执行 %s（%.0f 秒后）" % (target.strftime("%m-%d %H:%M"), wait))
-        if stop_event.wait(wait):
-            break
         try:
-            run_all()
-        except Exception as e:      # 调度线程不能死
-            log("调度轮次异常：%s" % e)
-        stop_event.wait(61)
+            _tick(stop_event, log)
+        except Exception as e:
+            log("[调度] 循环异常：%s" % str(e)[:200])
+            stop_event.wait(30)

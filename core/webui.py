@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """Web 管理台：账号增删改、token 导入、立即执行、日志查看。
 
-仅用标准库 http.server，无第三方依赖。设置 BUDDY_ADMIN_PASSWORD 后，
-访问任何页面会跳到只填密码的登录页，登录成功发一个签名 Cookie（默认 7 天）。
+仅用标准库 http.server，无第三方依赖。访问任何页面会跳到只填密码的登录页，
+登录成功发一个签名 Cookie（默认 7 天）。密码默认 admin，可在管理台「设置」里改。
 """
 import base64
 import datetime
@@ -27,11 +27,19 @@ WEB_DIR = os.path.join(HERE, "web")
 SESSION_COOKIE = "buddy_admin"
 SESSION_DAYS = 7
 KEY_PATH = os.path.join(settings.DATA_DIR, "session.key")
+DEFAULT_PASSWORD = "admin"
 
 
 def admin_password():
-    """运行时读取，便于 app.py 先加载 .env。"""
-    return os.environ.get("BUDDY_ADMIN_PASSWORD", "") or ""
+    """管理密码：环境变量 > 管理台设置 > 默认 admin。永远非空，默认就要登录。"""
+    env = (os.environ.get("BUDDY_ADMIN_PASSWORD") or "").strip()
+    if env:
+        return env
+    return (settings.load().get("admin_password") or "").strip() or DEFAULT_PASSWORD
+
+
+def password_is_default():
+    return admin_password() == DEFAULT_PASSWORD
 
 
 def _session_key():
@@ -135,6 +143,8 @@ def _profile(account):
         "token_expires_at": exp,
         "token_days_left": (int((exp - datetime.datetime.now().timestamp() * 1000) // 86400000)
                             if exp else None),
+        "token_refreshed_at": store.get("last_refresh_date") or "",
+        "token_refreshable": bool(store.get("refresh_token")),
         "today": datetime.datetime.now().strftime("%Y-%m-%d"),
         "signed_today": state.get("last_checkin_date") == datetime.datetime.now().strftime("%Y-%m-%d"),
         "checkin": state,
@@ -173,8 +183,6 @@ class Handler(BaseHTTPRequestHandler):
 
     def _authed(self):
         pwd = admin_password()
-        if not pwd:
-            return True
         if check_session(self._cookie(SESSION_COOKIE)):
             return True
         # 兼容命令行 / 脚本里的 Basic（浏览器不会走到这里，页面用登录页）
@@ -221,8 +229,6 @@ class Handler(BaseHTTPRequestHandler):
         u = urllib.parse.urlparse(self.path)
         path = u.path
         if path == "/login":
-            if not admin_password():
-                return self._send(302, "", "text/plain; charset=utf-8", {"Location": "/"})
             return self._login_page()
         if path == "/api/health":
             return self._json({"ok": True, "time": datetime.datetime.now().isoformat()})
@@ -237,12 +243,22 @@ class Handler(BaseHTTPRequestHandler):
             with open(p, "rb") as f:
                 return self._send(200, f.read(), "text/html; charset=utf-8")
         if path == "/api/accounts":
-            return self._json({"accounts": [_profile(a) for a in accounts.list_accounts()]})
+            nr = settings.next_run()
+            return self._json({
+                "accounts": [_profile(a) for a in accounts.list_accounts()],
+                "times": ["%02d:%02d" % t for t in settings.times()],
+                "next_run": nr.strftime("%m-%d %H:%M") if nr else "",
+            })
         if path == "/api/settings":
             cur = settings.load()
+            nr = settings.next_run()
             return self._json({
                 "webhook": cur.get("webhook") or "",
                 "webhook_configured": bool(settings.webhook_url()),
+                "times": ["%02d:%02d" % t for t in settings.times()],
+                "password_default": password_is_default(),
+                "password_from_env": bool((os.environ.get("BUDDY_ADMIN_PASSWORD") or "").strip()),
+                "next_run": nr.strftime("%Y-%m-%d %H:%M") if nr else "",
             })
         m = re.match(r"^/api/accounts/([^/]+)/(logs|run)$", path)
         if m:
@@ -310,14 +326,17 @@ class Handler(BaseHTTPRequestHandler):
         p = os.path.join(WEB_DIR, "login.html")
         if not os.path.exists(p):
             return self._send(404, "web/login.html 不存在", "text/plain; charset=utf-8")
+        hint = ("首次使用：默认密码 <b>admin</b>，登录后请在「设置」里改掉。"
+                if password_is_default() else "")
         with open(p, encoding="utf-8") as f:
-            html = f.read().replace("{{ERR}}", err).replace("{{SHOW_ERR}}", "block" if err else "none")
+            html = (f.read().replace("{{ERR}}", err)
+                    .replace("{{SHOW_ERR}}", "block" if err else "none")
+                    .replace("{{SHOW_HINT}}", "block" if hint else "none")
+                    .replace("{{HINT}}", hint))
         return self._send(code, html, "text/html; charset=utf-8")
 
     def _login(self):
         pwd = admin_password()
-        if not pwd:
-            return self._json({"ok": True, "no_password": True})
         given = (self._body().get("password") or "").strip()
         if not given:
             return self._login_page("请输入密码", 200)
@@ -349,18 +368,69 @@ class Handler(BaseHTTPRequestHandler):
         accounts.write_state(aid, "token_store.json", store)
         return self._json({"ok": True, "id": aid, "account": _profile(accounts.get_account(aid))})
 
-    # ---------- 通知设置（全局） ----------
+    # ---------- 设置（全局） ----------
     def _save_settings(self):
         body = self._body()
-        raw = (body.get("webhook") or "").strip()
-        if raw and "://" in raw and not raw.startswith(("http://", "https://")):
-            return self._json({"error": "请填 http/https 地址，或只填机器人 key"}, 400)
-        if raw and not raw.startswith(("http://", "https://")) and len(raw) < 8:
-            return self._json({"error": "机器人 key 看起来不完整"}, 400)
-        settings.save({"webhook": raw})
-        return self._json({"ok": True,
-                           "webhook": settings.load().get("webhook", ""),
-                           "webhook_configured": bool(settings.webhook_url())})
+        out = {}
+
+        if "webhook" in body:
+            raw = (body.get("webhook") or "").strip()
+            if raw and "://" in raw and not raw.startswith(("http://", "https://")):
+                return self._json({"error": "推送地址请填 http/https，或只填机器人 key"}, 400)
+            if raw and not raw.startswith(("http://", "https://")) and len(raw) < 8:
+                return self._json({"error": "机器人 key 看起来不完整"}, 400)
+            out["webhook"] = raw
+
+        if "times" in body:
+            raw = body.get("times")
+            items = raw if isinstance(raw, list) else str(raw or "").replace(",", "\n").splitlines()
+            clean, bad = [], []
+            for t in items:
+                t = str(t).strip()
+                if not t:
+                    continue
+                try:
+                    hh, mm = t.split(":")
+                    h, m = int(hh), int(mm)
+                    assert 0 <= h < 24 and 0 <= m < 60
+                    clean.append("%02d:%02d" % (h, m))
+                except Exception:
+                    bad.append(t)
+            if bad:
+                return self._json({"error": "时间格式不对（应为 HH:MM）：%s" % "、".join(bad[:3])}, 400)
+            clean = sorted(set(clean))
+            if not clean:
+                return self._json({"error": "至少保留一个时间点"}, 400)
+            if len(clean) > 12:
+                return self._json({"error": "时间点最多 12 个"}, 400)
+            out["times"] = clean
+
+        changed_pwd = False
+        if "password" in body:
+            pwd = (body.get("password") or "").strip()
+            if pwd:
+                if len(pwd) < 4:
+                    return self._json({"error": "密码至少 4 位"}, 400)
+                if (os.environ.get("BUDDY_ADMIN_PASSWORD") or "").strip():
+                    return self._json(
+                        {"error": "当前密码由环境变量 BUDDY_ADMIN_PASSWORD 指定，改这里无效"}, 400)
+                changed_pwd = pwd != admin_password()
+                out["admin_password"] = pwd
+
+        if out:
+            settings.save(out)
+
+        cur = settings.load()
+        nr = settings.next_run()
+        return self._json({
+            "ok": True,
+            "webhook": cur.get("webhook", ""),
+            "webhook_configured": bool(settings.webhook_url()),
+            "times": ["%02d:%02d" % t for t in settings.times()],
+            "password_default": password_is_default(),
+            "password_changed": changed_pwd,
+            "next_run": nr.strftime("%Y-%m-%d %H:%M") if nr else "",
+        })
 
     def _test_push(self):
         if not settings.webhook_url():

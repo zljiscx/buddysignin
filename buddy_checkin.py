@@ -157,6 +157,9 @@ def load_config(data_dir=None, overrides=None):
             # 管理台允许只填机器人 key，这里统一补成完整地址
             cfg["webhook"] = hook if "://" in hook else WEBHOOK_SEND + hook
             cfg["webhook_key"] = ""
+        # 管理台设置的自动执行时间点优先于配置文件
+        if isinstance(st, dict) and isinstance(st.get("times"), list) and st["times"]:
+            cfg["times"] = [str(x).strip() for x in st["times"] if str(x).strip()]
     except FileNotFoundError:
         pass
     except Exception as e:  # noqa

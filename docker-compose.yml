@@ -1,16 +1,13 @@
 services:
   buddy:
-    # 默认 Docker Hub；拉不动时换成 ghcr.io/zljiscx/buddysignin:latest
-    image: ${BUDDY_IMAGE:-zljiscx/buddysignin:latest}
+    image: zljiscx/buddysignin:latest
     container_name: buddy-signin
     restart: unless-stopped
     ports:
-      # 宿主端口可用 BUDDY_PORT 改；容器内固定 18321
-      - "${BUDDY_PORT:-18321}:18321"
+      # 左边是宿主机端口，被占用就改这个数字；右边是容器内固定端口，别动
+      - "18321:18321"
     environment:
       - TZ=Asia/Shanghai
-      # 设置后 Web 管理台启用 HTTP Basic 认证（用户名任意，密码即此值）
-      - BUDDY_ADMIN_PASSWORD=${BUDDY_ADMIN_PASSWORD:-}
     volumes:
-      # 账号、token、状态、日志、推送设置全部在此卷
+      # 账号、token、状态、日志、设置全部在这个目录
       - ./data:/app/data

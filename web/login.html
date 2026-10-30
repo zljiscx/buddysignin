@@ -21,6 +21,9 @@
   button:hover{background:#0e54dd}
   button:disabled{opacity:.6;cursor:not-allowed}
   .err{display:{{SHOW_ERR}};color:#b3261e;font-size:12px;margin-top:12px}
+  .hint{display:{{SHOW_HINT}};background:#fff8e6;border:1px solid #f5e0a8;color:#8a5b00;font-size:12px;
+        line-height:1.7;padding:9px 11px;border-radius:8px;margin-bottom:16px}
+  .hint b{color:#6b4600}
   .tip{margin-top:18px;color:#9aa0a6;font-size:11px;line-height:1.6}
 </style>
 </head>
@@ -28,11 +31,12 @@
 <form class="box" id="f" autocomplete="off">
   <h1>Buddy 签到管理台</h1>
   <div class="sub">输入管理密码继续</div>
+  <div class="hint">{{HINT}}</div>
   <label for="pwd">管理密码</label>
-  <input id="pwd" type="password" autocomplete="current-password" autofocus placeholder="留空则关闭密码校验">
+  <input id="pwd" type="password" autocomplete="current-password" autofocus placeholder="请输入管理密码">
   <button id="btn" type="submit">登录</button>
   <div class="err" id="err">{{ERR}}</div>
-  <div class="tip">密码来自部署时的 BUDDY_ADMIN_PASSWORD，登录状态保持 7 天。</div>
+  <div class="tip">登录状态保持 7 天，密码可在管理台「设置」里修改。</div>
 </form>
 <script>
 const f = document.getElementById('f'), pwd = document.getElementById('pwd');

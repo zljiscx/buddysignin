@@ -32,7 +32,9 @@
   .cell .v{font-size:14px;font-weight:500}
   .ok{color:#137333}.bad{color:#b3261e}.warn{color:#b06000}
   .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
-  dialog{border:none;border-radius:10px;padding:0;width:min(860px,92vw);box-shadow:0 12px 40px rgba(0,0,0,.18)}
+  /* 注意：上面的 *{margin:0} 会覆盖 dialog 默认的居中，必须显式写回 margin:auto */
+  dialog{position:fixed;inset:0;margin:auto;border:none;border-radius:10px;padding:0;width:min(860px,92vw);
+         max-height:88vh;overflow:auto;box-shadow:0 12px 40px rgba(0,0,0,.18)}
   dialog::backdrop{background:rgba(0,0,0,.35)}
   .dlg-head{padding:16px 18px;border-bottom:1px solid #eef0f2;display:flex;justify-content:space-between;align-items:center}
   .dlg-body{padding:16px 18px}
@@ -55,7 +57,7 @@
     </div>
     <div class="row">
       <button class="btn" onclick="refresh()">刷新</button>
-      <button class="btn" onclick="openSettings()">通知设置</button>
+      <button class="btn" onclick="openSettings()">设置</button>
       <button class="btn primary" onclick="openAdd()">+ 添加账号</button>
       <button class="btn" onclick="runAll()">全部执行</button>
       <button class="btn" onclick="logout()" title="退出登录">退出</button>
@@ -84,17 +86,31 @@
 </dialog>
 
 <dialog id="setDlg">
-  <div class="dlg-head"><strong>通知设置</strong><button class="btn" onclick="setDlg.close()">关闭</button></div>
+  <div class="dlg-head"><strong>设置</strong><button class="btn" onclick="setDlg.close()">关闭</button></div>
   <div class="dlg-body">
+    <label>每日自动执行时间点（每行一个，24 小时制 HH:MM）</label>
+    <textarea id="setTimes" style="min-height:112px" placeholder="08:10&#10;12:40&#10;20:30"></textarea>
+    <div class="sub" style="margin-top:8px;line-height:1.8">
+      可填多个时间点，当天每个点先后兜底。签到达成后其余步骤会自动跳过，
+      没做完的（对话 / 连登奖励 / 猫猫旅行）在下一个时间点补做，不会重复刷接口。<br>
+      常驻运行即时生效；如果用「定时启动」方式，改完请让计划任务按这些时间点触发。
+    </div>
+
     <label>企业微信群机器人地址（留空 = 不推送）</label>
     <input type="text" id="setHook" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxx">
     <div class="sub" style="margin-top:8px;line-height:1.8">
-      群聊 → 右上角 → 添加群机器人 → 复制 Webhook 地址粘贴到这里。也可以只填地址末尾的 key。<br>
-      填了就推送、清空就不推送，保存后立即生效（所有账号共用）。
+      群聊 → 右上角 → 添加群机器人 → 复制 Webhook 地址粘贴到这里，也可以只填地址末尾的 key。
     </div>
-    <div style="margin-top:16px;display:flex;gap:10px;align-items:center">
+
+    <label>管理密码（留空则不修改）</label>
+    <input type="password" id="setPwd" autocomplete="new-password" placeholder="默认 admin，建议改成自己的">
+    <div class="sub" style="margin-top:8px;line-height:1.8" id="setPwdHint">
+      修改后当前登录会失效，需要用新密码重新登录。
+    </div>
+
+    <div style="margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <button class="btn primary" id="setBtn" onclick="saveSettings()">保存</button>
-      <button class="btn" id="testBtn" onclick="testPush()">保存并测试</button>
+      <button class="btn" id="testBtn" onclick="testPush()">保存并测试推送</button>
       <span id="setMsg" style="font-size:13px;color:#697078"></span>
     </div>
   </div>
@@ -130,7 +146,9 @@ async function refresh(){
   try{
     const d = await api('/api/accounts');
     accounts = d.accounts || [];
-    $('#sub').textContent = `共 ${accounts.length} 个账号 · ${new Date().toLocaleString('zh-CN')}`;
+    const pts = (d.times || []).join(' / ');
+    $('#sub').textContent = `共 ${accounts.length} 个账号 · ${pts ? '每天 ' + pts : '未设时间点'}`
+      + `${d.next_run ? ' · 下次 ' + d.next_run : ''} · ${new Date().toLocaleString('zh-CN')}`;
     render();
   }catch(e){
     $('#list').innerHTML = `<div class="card empty">读取失败：${esc(e.message)}</div>`;
@@ -165,7 +183,10 @@ function render(){
         <div class="cell"><div class="k">今日对话</div><div class="v ${a.chat_done_today?'ok':'bad'}">${a.chat_done_today?'已完成':'未完成'}</div></div>
         <div class="cell"><div class="k">猫猫旅行</div><div class="v ${a.travel_done_today?'ok':'warn'}">${a.travel_done_today?'已完成':'待处理'}</div></div>
         <div class="cell"><div class="k">连登天数</div><div class="v">${c.streak_days ?? '-'} 天</div></div>
-        <div class="cell"><div class="k">Token 剩余</div><div class="v ${expCls}">${expTxt}</div></div>
+        <div class="cell"><div class="k">Token 剩余</div><div class="v ${expCls}">${expTxt}</div>${
+          a.token_refreshed_at ? `<div class="uid" style="margin-top:4px">已续期 ${esc(a.token_refreshed_at)}</div>`
+          : (a.token_refreshable ? '<div class="uid" style="margin-top:4px">下次执行时续期</div>'
+             : '<div class="uid bad" style="margin-top:4px">无续期凭据</div>')}</div>
         <div class="cell"><div class="k">上次执行</div><div class="v" style="font-size:12px">${esc(a.last_run?.time || '—')}</div></div>
       </div>
       ${a.last_run?.lines?.length ? `<div style="color:#697078;font-size:12px;line-height:1.9">${a.last_run.lines.map(esc).join('<br>')}</div>` : ''}
@@ -232,12 +253,21 @@ async function doAdd(){
 refresh();
 setInterval(refresh, 60000);
 
-// ---------- 通知设置 ----------
+// ---------- 设置 ----------
 async function openSettings(){
   try{
     const d = await api('/api/settings');
     $('#setHook').value = d.webhook || '';
-    setHookMsg(d.webhook_configured ? '当前：已配置，每天结果会推送到群里' : '当前：未配置，不推送', '#697078');
+    $('#setTimes').value = (d.times || []).join('\n');
+    $('#setPwd').value = '';
+    if(d.password_from_env){
+      $('#setPwdHint').textContent = '当前密码由环境变量 BUDDY_ADMIN_PASSWORD 指定，这里填写不会生效。';
+    }else if(d.password_default){
+      $('#setPwdHint').textContent = '当前是默认密码 admin，建议改成自己的（改完需重新登录）。';
+    }else{
+      $('#setPwdHint').textContent = '修改后当前登录会失效，需要用新密码重新登录。';
+    }
+    setHookMsg(`${d.webhook_configured ? '推送：已配置' : '推送：未配置'} · 下次执行 ${d.next_run || '—'}`, '#697078');
     setDlg.showModal();
   }catch(e){ toast('读取失败：' + e.message); }
 }
@@ -247,16 +277,29 @@ function setHookMsg(text, color){
 }
 
 async function saveSettings(){
-  $('#setBtn').disabled = true;
+  $('#setBtn').disabled = true; $('#testBtn').disabled = true;
   try{
-    const r = await api('/api/settings', {method:'POST', body: JSON.stringify({webhook: $('#setHook').value.trim()})});
-    setHookMsg(r.webhook_configured ? '已保存，之后每天结果会推送到这个群' : '已保存，推送已关闭', '#137333');
+    const body = {
+      times: $('#setTimes').value.split('\n').map(s=>s.trim()).filter(Boolean),
+      webhook: $('#setHook').value.trim()
+    };
+    const pwd = $('#setPwd').value;
+    if(pwd) body.password = pwd;
+    const r = await api('/api/settings', {method:'POST', body: JSON.stringify(body)});
+    if(r.password_changed){
+      setHookMsg('密码已修改，正在退出重新登录…', '#137333');
+      setTimeout(()=>location.replace('/login'), 1200);
+      return false;
+    }
+    $('#setPwd').value = '';
+    setHookMsg(`${r.webhook_configured ? '推送：已配置' : '推送：未配置'} · 下次执行 ${r.next_run || '—'}`, '#137333');
+    await refresh();
     toast('已保存');
     return true;
   }catch(e){
     setHookMsg(e.message, '#b3261e');
     return false;
-  }finally{ $('#setBtn').disabled = false; }
+  }finally{ $('#setBtn').disabled = false; $('#testBtn').disabled = false; }
 }
 
 async function testPush(){
