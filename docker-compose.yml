@@ -1,0 +1,16 @@
+services:
+  buddy:
+    # 镜像默认走 Docker Hub；也可用 .env 的 BUDDY_IMAGE 覆盖成自己的仓库
+    image: ${BUDDY_IMAGE:-zljiscx/buddysignin:latest}
+    container_name: buddy-signin
+    restart: unless-stopped
+    ports:
+      # 宿主端口可用 BUDDY_PORT 改；容器内固定 18321
+      - "${BUDDY_PORT:-18321}:18321"
+    environment:
+      - TZ=Asia/Shanghai
+      # 设置后 Web 管理台启用 HTTP Basic 认证（用户名任意，密码即此值）
+      - BUDDY_ADMIN_PASSWORD=${BUDDY_ADMIN_PASSWORD:-}
+    volumes:
+      # 账号、token、状态、日志、推送设置全部在此卷
+      - ./data:/app/data

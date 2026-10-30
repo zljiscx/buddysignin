@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Buddy 签到管理台</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:#f5f6f8;color:#1f2329;padding:24px;font-size:14px}
+  .wrap{max-width:1080px;margin:0 auto}
+  header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px}
+  h1{font-size:20px;font-weight:600}
+  .sub{color:#8a9099;font-size:12px;margin-top:4px}
+  .btn{border:1px solid #d9dde3;background:#fff;color:#1f2329;padding:7px 14px;border-radius:6px;cursor:pointer;font-size:13px}
+  .btn:hover{background:#f0f2f5}
+  .btn.primary{background:#1664ff;border-color:#1664ff;color:#fff}
+  .btn.primary:hover{background:#0e54dd}
+  .btn.danger{color:#d93026;border-color:#f0c2be}
+  .btn.danger:hover{background:#fff1f0}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .grid{display:grid;gap:14px}
+  .card{background:#fff;border:1px solid #e6e8eb;border-radius:10px;padding:18px}
+  .card-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+  .name{font-size:16px;font-weight:600;display:flex;align-items:center;gap:8px}
+  .tag{font-size:11px;padding:2px 8px;border-radius:10px;background:#eef1f5;color:#697078;font-weight:400}
+  .tag.on{background:#e6f4ea;color:#137333}
+  .tag.off{background:#f1f3f4;color:#80868b}
+  .uid{color:#9aa0a6;font-size:12px;font-family:ui-monospace,Menlo,monospace;margin-top:6px}
+  .rows{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:14px 0}
+  .cell{background:#fafbfc;border-radius:8px;padding:10px 12px}
+  .cell .k{color:#8a9099;font-size:12px;margin-bottom:4px}
+  .cell .v{font-size:14px;font-weight:500}
+  .ok{color:#137333}.bad{color:#b3261e}.warn{color:#b06000}
+  .actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+  dialog{border:none;border-radius:10px;padding:0;width:min(860px,92vw);box-shadow:0 12px 40px rgba(0,0,0,.18)}
+  dialog::backdrop{background:rgba(0,0,0,.35)}
+  .dlg-head{padding:16px 18px;border-bottom:1px solid #eef0f2;display:flex;justify-content:space-between;align-items:center}
+  .dlg-body{padding:16px 18px}
+  pre{background:#0f1419;color:#d7dde3;padding:14px;border-radius:8px;font-size:12px;line-height:1.6;max-height:56vh;overflow:auto;white-space:pre-wrap;word-break:break-all}
+  textarea,input[type=text]{width:100%;border:1px solid #d9dde3;border-radius:6px;padding:9px 11px;font-size:13px;font-family:inherit}
+  textarea{min-height:96px;resize:vertical;font-family:ui-monospace,Menlo,monospace}
+  label{display:block;font-size:12px;color:#697078;margin:12px 0 6px}
+  .empty{text-align:center;color:#9aa0a6;padding:48px 0}
+  .toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#1f2329;color:#fff;padding:10px 18px;border-radius:8px;font-size:13px;opacity:0;transition:.2s;z-index:99}
+  .toast.show{opacity:1}
+  .row{display:flex;gap:10px;align-items:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Buddy 签到管理台</h1>
+      <div class="sub" id="sub">加载中…</div>
+    </div>
+    <div class="row">
+      <button class="btn" onclick="refresh()">刷新</button>
+      <button class="btn" onclick="openSettings()">通知设置</button>
+      <button class="btn primary" onclick="openAdd()">+ 添加账号</button>
+      <button class="btn" onclick="runAll()">全部执行</button>
+    </div>
+  </header>
+  <div class="grid" id="list"></div>
+</div>
+
+<dialog id="addDlg">
+  <div class="dlg-head"><strong>添加账号</strong><button class="btn" onclick="addDlg.close()">关闭</button></div>
+  <div class="dlg-body">
+    <label>备注名称（可选）</label>
+    <input type="text" id="addName" placeholder="如：主号 / 工作号">
+    <label>Token 或 transfer code（在桌面端运行 buddy_auth.py 获取）</label>
+    <textarea id="addToken" placeholder="eyJhbGciOi... 或 buddy_auth 打印的一行 transfer code"></textarea>
+    <div style="margin-top:16px;display:flex;gap:10px">
+      <button class="btn primary" id="addBtn" onclick="doAdd()">添加</button>
+      <span id="addMsg" style="color:#b3261e;font-size:13px;align-self:center"></span>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="logDlg">
+  <div class="dlg-head"><strong id="logTitle">日志</strong><button class="btn" onclick="logDlg.close()">关闭</button></div>
+  <div class="dlg-body"><pre id="logBody">加载中…</pre></div>
+</dialog>
+
+<dialog id="setDlg">
+  <div class="dlg-head"><strong>通知设置</strong><button class="btn" onclick="setDlg.close()">关闭</button></div>
+  <div class="dlg-body">
+    <label>企业微信群机器人地址（留空 = 不推送）</label>
+    <input type="text" id="setHook" placeholder="https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxx">
+    <div class="sub" style="margin-top:8px;line-height:1.8">
+      群聊 → 右上角 → 添加群机器人 → 复制 Webhook 地址粘贴到这里。也可以只填地址末尾的 key。<br>
+      填了就推送、清空就不推送，保存后立即生效（所有账号共用）。
+    </div>
+    <div style="margin-top:16px;display:flex;gap:10px;align-items:center">
+      <button class="btn primary" id="setBtn" onclick="saveSettings()">保存</button>
+      <button class="btn" id="testBtn" onclick="testPush()">保存并测试</button>
+      <span id="setMsg" style="font-size:13px;color:#697078"></span>
+    </div>
+  </div>
+</dialog>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let accounts = [];
+
+function toast(msg){
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._t); t._t = setTimeout(()=>t.classList.remove('show'), 2200);
+}
+
+async function api(path, opt={}){
+  const r = await fetch(path, Object.assign({headers:{'Content-Type':'application/json'}}, opt));
+  const txt = await r.text();
+  let data; try{ data = JSON.parse(txt); }catch(e){ data = {error: txt}; }
+  if(!r.ok) throw new Error(data.error || ('HTTP '+r.status));
+  return data;
+}
+
+async function refresh(){
+  try{
+    const d = await api('/api/accounts');
+    accounts = d.accounts || [];
+    $('#sub').textContent = `共 ${accounts.length} 个账号 · ${new Date().toLocaleString('zh-CN')}`;
+    render();
+  }catch(e){
+    $('#list').innerHTML = `<div class="card empty">读取失败：${esc(e.message)}</div>`;
+  }
+}
+
+function render(){
+  if(!accounts.length){
+    $('#list').innerHTML = '<div class="card empty">还没有账号，点右上角「添加账号」导入 token</div>';
+    return;
+  }
+  $('#list').innerHTML = accounts.map(a=>{
+    const days = a.token_days_left;
+    const expCls = days === null ? 'warn' : (days < 3 ? 'bad' : 'ok');
+    const expTxt = days === null ? '未知' : (days < 0 ? '已过期' : days + ' 天');
+    const c = a.checkin || {};
+    return `<div class="card">
+      <div class="card-head">
+        <div>
+          <div class="name">${esc(a.name)} <span class="tag ${a.enabled?'on':'off'}">${a.enabled?'启用':'停用'}</span></div>
+          <div class="uid">${esc(a.id)}</div>
+        </div>
+        <div class="actions">
+          <button class="btn primary" data-run="${esc(a.id)}">立即执行</button>
+          <button class="btn" data-log="${esc(a.id)}">日志</button>
+          <button class="btn" data-toggle="${esc(a.id)}">${a.enabled?'停用':'启用'}</button>
+          <button class="btn danger" data-del="${esc(a.id)}">删除</button>
+        </div>
+      </div>
+      <div class="rows">
+        <div class="cell"><div class="k">今日签到</div><div class="v ${a.signed_today?'ok':'bad'}">${a.signed_today?'已完成':'未完成'}</div></div>
+        <div class="cell"><div class="k">今日对话</div><div class="v ${a.chat_done_today?'ok':'bad'}">${a.chat_done_today?'已完成':'未完成'}</div></div>
+        <div class="cell"><div class="k">猫猫旅行</div><div class="v ${a.travel_done_today?'ok':'warn'}">${a.travel_done_today?'已完成':'待处理'}</div></div>
+        <div class="cell"><div class="k">连登天数</div><div class="v">${c.streak_days ?? '-'} 天</div></div>
+        <div class="cell"><div class="k">Token 剩余</div><div class="v ${expCls}">${expTxt}</div></div>
+        <div class="cell"><div class="k">上次执行</div><div class="v" style="font-size:12px">${esc(a.last_run?.time || '—')}</div></div>
+      </div>
+      ${a.last_run?.lines?.length ? `<div style="color:#697078;font-size:12px;line-height:1.9">${a.last_run.lines.map(esc).join('<br>')}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+$('#list').addEventListener('click', async e=>{
+  const b = e.target.closest('button'); if(!b) return;
+  try{
+    if(b.dataset.run){
+      b.disabled = true; b.textContent = '执行中…';
+      const r = await api(`/api/accounts/${encodeURIComponent(b.dataset.run)}/run`, {method:'POST'});
+      toast((r.ok?'执行完成':'执行失败') + '：' + (r.lines||[]).join(' | '));
+      await refresh();
+    }
+    if(b.dataset.log){
+      $('#logTitle').textContent = '日志 · ' + b.dataset.log;
+      $('#logBody').textContent = '加载中…';
+      logDlg.showModal();
+      const r = await api(`/api/accounts/${encodeURIComponent(b.dataset.log)}/logs?lines=300`);
+      $('#logBody').textContent = r.log || '（空）';
+    }
+    if(b.dataset.toggle){
+      const a = accounts.find(x=>x.id===b.dataset.toggle);
+      await api(`/api/accounts/${encodeURIComponent(a.id)}`, {method:'PATCH', body:JSON.stringify({name:a.name, enabled:!a.enabled})});
+      await refresh();
+    }
+    if(b.dataset.del){
+      if(!confirm('确定删除该账号？本地 token 与状态会一并删除，不可恢复。')) return;
+      await api(`/api/accounts/${encodeURIComponent(b.dataset.del)}`, {method:'DELETE'});
+      toast('已删除'); await refresh();
+    }
+  }catch(err){ toast('失败：'+err.message); b.disabled=false; b.textContent='立即执行'; }
+});
+
+async function runAll(){
+  const list = accounts.filter(a=>a.enabled);
+  if(!list.length) return toast('没有启用的账号');
+  toast(`开始执行 ${list.length} 个账号…`);
+  for(const a of list){
+    try{
+      const r = await api(`/api/accounts/${encodeURIComponent(a.id)}/run`, {method:'POST'});
+      toast(`${a.name}：${(r.lines||[]).join(' | ') || '完成'}`);
+    }catch(e){ toast(`${a.name} 失败：${e.message}`); }
+  }
+  await refresh();
+}
+
+function openAdd(){ addDlg.showModal(); }
+async function doAdd(){
+  const token = $('#addToken').value.trim();
+  if(!token) return $('#addMsg').textContent = '请填入 token';
+  $('#addBtn').disabled = true;
+  try{
+    const r = await api('/api/accounts', {method:'POST', body: JSON.stringify({token, name: $('#addName').value.trim()})});
+    addDlg.close(); $('#addToken').value=''; $('#addName').value=''; $('#addMsg').textContent='';
+    toast('已添加：' + (r.account?.name || r.id));
+    await refresh();
+  }catch(e){ $('#addMsg').textContent = e.message; }
+  finally{ $('#addBtn').disabled = false; }
+}
+
+refresh();
+setInterval(refresh, 60000);
+
+// ---------- 通知设置 ----------
+async function openSettings(){
+  try{
+    const d = await api('/api/settings');
+    $('#setHook').value = d.webhook || '';
+    setMsg(d.webhook_configured ? '当前：已配置，每天结果会推送到群里' : '当前：未配置，不推送', '#697078');
+    setDlg.showModal();
+  }catch(e){ toast('读取失败：' + e.message); }
+}
+
+function setMsg(text, color){
+  const el = $('#setMsg'); el.textContent = text; el.style.color = color || '#697078';
+}
+
+async function saveSettings(){
+  $('#setBtn').disabled = true;
+  try{
+    const r = await api('/api/settings', {method:'POST', body: JSON.stringify({webhook: $('#setHook').value.trim()})});
+    setMsg(r.webhook_configured ? '已保存，之后每天结果会推送到这个群' : '已保存，推送已关闭', '#137333');
+    toast('已保存');
+    return true;
+  }catch(e){
+    setMsg(e.message, '#b3261e');
+    return false;
+  }finally{ $('#setBtn').disabled = false; }
+}
+
+async function testPush(){
+  $('#testBtn').disabled = true;
+  try{
+    if(!await saveSettings()) return;
+    setMsg('发送中…', '#697078');
+    const r = await api('/api/settings/test', {method:'POST'});
+    if(r.ok) setMsg('测试消息已推送，请查看群消息', '#137333');
+    else setMsg('推送失败：' + (r.message || ('HTTP ' + r.status)), '#b3261e');
+  }catch(e){ setMsg('推送失败：' + e.message, '#b3261e'); }
+  finally{ $('#testBtn').disabled = false; }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+# 账号数据（含 token，绝不能提交）
+data/
+_tmp/
+.env
+
+# 本地工作记录
+.workbuddy/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 编辑器/系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
