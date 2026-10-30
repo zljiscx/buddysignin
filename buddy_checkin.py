@@ -128,10 +128,6 @@ def load_config(data_dir=None, overrides=None):
         cfg["auth_mode"] = "token"
 
     # 环境变量覆盖（不含 auth_file，见 resolve_auth_file）
-    if os.environ.get("BUDDY_WEBHOOK"):
-        cfg["webhook"] = os.environ["BUDDY_WEBHOOK"]
-    if os.environ.get("BUDDY_WEBHOOK_KEY"):
-        cfg["webhook_key"] = os.environ["BUDDY_WEBHOOK_KEY"]
     if os.environ.get("BUDDY_API_BASES"):
         cfg["api_bases"] = [b.strip() for b in os.environ["BUDDY_API_BASES"].split(",") if b.strip()]
     if os.environ.get("BUDDY_LOG_FILE"):

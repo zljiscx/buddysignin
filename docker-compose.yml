@@ -1,7 +1,7 @@
 services:
   buddy:
-    # 默认用 GHCR（已验证公开可匿名拉取）；也可换成 Docker Hub 的 zljiscx/buddysignin:latest
-    image: ${BUDDY_IMAGE:-ghcr.io/zljiscx/buddysignin:latest}
+    # 默认 Docker Hub；拉不动时换成 ghcr.io/zljiscx/buddysignin:latest
+    image: ${BUDDY_IMAGE:-zljiscx/buddysignin:latest}
     container_name: buddy-signin
     restart: unless-stopped
     ports:
