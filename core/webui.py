@@ -17,7 +17,11 @@ import buddy_checkin as bc
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(HERE, "web")
-ADMIN_PASSWORD = os.environ.get("BUDDY_ADMIN_PASSWORD", "")
+
+
+def admin_password():
+    """运行时读取，便于 app.py 先加载 .env。"""
+    return os.environ.get("BUDDY_ADMIN_PASSWORD", "") or ""
 
 
 def _jwt(token):
@@ -105,13 +109,14 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---------- 基础 ----------
     def _authed(self):
-        if not ADMIN_PASSWORD:
+        pwd = admin_password()
+        if not pwd:
             return True
         hdr = self.headers.get("Authorization", "")
         if hdr.startswith("Basic "):
             try:
-                _, pwd = base64.b64decode(hdr[6:]).decode().split(":", 1)
-                return pwd == ADMIN_PASSWORD
+                _, passwd = base64.b64decode(hdr[6:]).decode().split(":", 1)
+                return passwd == pwd
             except Exception:
                 return False
         return False

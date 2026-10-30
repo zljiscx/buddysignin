@@ -13,7 +13,29 @@ import os
 import signal
 import threading
 
-from core import accounts, runner, webui
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _load_dotenv(path=None):
+    """读取项目根目录 .env（不覆盖已有环境变量），让本地运行与 docker compose 行为一致。"""
+    path = path or os.path.join(HERE, ".env")
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                k, v = k.strip(), v.strip().strip('"').strip("'")
+                if k and k not in os.environ:
+                    os.environ[k] = v
+    except FileNotFoundError:
+        pass
+
+
+_load_dotenv()
+
+from core import accounts, runner, webui      # noqa: E402  (.env 需先加载)
 
 
 def main():
