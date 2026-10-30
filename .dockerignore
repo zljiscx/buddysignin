@@ -1,0 +1,21 @@
+# 运行时数据（含 token）不进构建上下文
+data/
+_tmp/
+.env
+
+# 版本库与本地记录
+.git/
+.github/
+.workbuddy/
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 编辑器/系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
