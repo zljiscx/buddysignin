@@ -26,7 +26,7 @@ cp .env.example .env
 编辑 `.env`（保持默认也能跑）：
 
 ```ini
-BUDDY_IMAGE=ghcr.io/zljiscx/buddysignin:latest
+BUDDY_IMAGE=zljiscx/buddysignin:latest
 BUDDY_PORT=18321
 BUDDY_ADMIN_PASSWORD=换成你自己的密码
 ```
@@ -39,7 +39,8 @@ docker compose up -d
 
 打开 `http://<主机IP>:18321`，输入密码进入管理台。
 
-> 镜像默认从 GHCR 拉取（已设为 Public，NAS 免登录直接 pull），amd64 + arm64 双架构。
+> 镜像从 Docker Hub 拉取（amd64 + arm64）。国内直连 Docker Hub 慢或超时的话，把上面那行换成
+> `ghcr.io/zljiscx/buddysignin:latest`（同一份镜像，免登录）。
 > 默认端口特意选了不常用的 **18321**，避免和群晖/其他服务抢 8080。
 
 ## 镜像与自动构建
