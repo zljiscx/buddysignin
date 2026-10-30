@@ -26,7 +26,7 @@ cp .env.example .env
 编辑 `.env`（保持默认也能跑）：
 
 ```ini
-BUDDY_IMAGE=zljiscx/buddysignin:latest
+BUDDY_IMAGE=ghcr.io/zljiscx/buddysignin:latest
 BUDDY_PORT=18321
 BUDDY_ADMIN_PASSWORD=换成你自己的密码
 ```
@@ -39,23 +39,26 @@ docker compose up -d
 
 打开 `http://<主机IP>:18321`，输入密码进入管理台。
 
-> 镜像默认从 Docker Hub 拉取（amd64 + arm64）。默认端口特意选了不常用的 **18321**，避免和群晖/其他服务抢 8080。
+> 镜像默认从 GHCR 拉取（已设为 Public，NAS 免登录直接 pull），amd64 + arm64 双架构。
+> 默认端口特意选了不常用的 **18321**，避免和群晖/其他服务抢 8080。
 
 ## 镜像与自动构建
 
 `.github/workflows/docker.yml` 在推送到 `main` 或打 `v*` 标签时自动构建多架构镜像：
 
-- **Docker Hub**（默认主推）：`docker.io/<DOCKERHUB_USERNAME>/buddysignin`，仓库公开即可直接 `pull`
-- **GHCR**（始终推送，无需额外配置）：`ghcr.io/zljiscx/buddysignin`
+| 仓库 | 地址 | 说明 |
+|---|---|---|
+| GHCR | `ghcr.io/zljiscx/buddysignin` | 默认，已公开，免登录可拉 |
+| Docker Hub | `zljiscx/buddysignin` | 需先配下面两个 secret，配了就会一起推 |
 
-要启用 Docker Hub 推送，在仓库 **Settings → Secrets and variables → Actions** 里加两个 secret：
+要用 Docker Hub，在仓库 **Settings → Secrets and variables → Actions** 加：
 
 | Secret | 值 |
 |---|---|
 | `DOCKERHUB_USERNAME` | Docker Hub 用户名 |
 | `DOCKERHUB_TOKEN` | Docker Hub → Account Settings → Personal access tokens 生成的 token |
 
-没配这两个 secret 时，CI 只推 GHCR，不会失败。
+没配这两个 secret 时，CI 只推 GHCR，不会失败。配好之后把 `.env` 的 `BUDDY_IMAGE` 换成 `zljiscx/buddysignin:latest` 即可。
 
 手动发版：
 
