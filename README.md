@@ -37,7 +37,10 @@ BUDDY_ADMIN_PASSWORD=换成你自己的密码
 docker compose up -d
 ```
 
-打开 `http://<主机IP>:18321`，输入密码进入管理台。
+打开 `http://<主机IP>:18321`，会跳到登录页，**只填密码**（就是上面那个
+`BUDDY_ADMIN_PASSWORD`）即可进入，登录状态保持 7 天。
+
+> `.env` 里把 `BUDDY_ADMIN_PASSWORD` 留空 = 不校验密码，谁都能进，别对公网这样放。
 
 > 镜像从 Docker Hub 拉取（amd64 + arm64）。国内直连 Docker Hub 慢或超时的话，把上面那行换成
 > `ghcr.io/zljiscx/buddysignin:latest`（同一份镜像，免登录）。
@@ -122,6 +125,10 @@ python app.py --port 19000     # 换端口
 无第三方依赖，仅 Python 3.8+ 标准库。本地运行同样会读取根目录 `.env`
 （管理台密码、端口），与容器行为一致；想临时不校验密码，把 `.env` 里的
 `BUDDY_ADMIN_PASSWORD` 清空即可。
+
+登录用签名 Cookie（`data/session.key` 签名，HttpOnly，7 天有效），改密码会让
+所有旧登录立即失效；页面右上角有「退出」按钮。命令行调试想免登录，可以直接带
+`-u any:<密码>` 走 Basic 认证。
 
 ## 配置
 

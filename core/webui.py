@@ -1,14 +1,19 @@
 # -*- coding: utf-8 -*-
 """Web 管理台：账号增删改、token 导入、立即执行、日志查看。
 
-仅用标准库 http.server，无第三方依赖。设置 BUDDY_ADMIN_PASSWORD 后启用 HTTP Basic 认证。
+仅用标准库 http.server，无第三方依赖。设置 BUDDY_ADMIN_PASSWORD 后，
+访问任何页面会跳到只填密码的登录页，登录成功发一个签名 Cookie（默认 7 天）。
 """
 import base64
 import datetime
+import hashlib
+import hmac
 import json
 import os
 import re
+import secrets
 import threading
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -19,9 +24,59 @@ HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(HERE, "web")
 
 
+SESSION_COOKIE = "buddy_admin"
+SESSION_DAYS = 7
+KEY_PATH = os.path.join(settings.DATA_DIR, "session.key")
+
+
 def admin_password():
     """运行时读取，便于 app.py 先加载 .env。"""
     return os.environ.get("BUDDY_ADMIN_PASSWORD", "") or ""
+
+
+def _session_key():
+    """Cookie 签名密钥，首次自动生成到 data/session.key。"""
+    try:
+        with open(KEY_PATH, "rb") as f:
+            k = f.read().strip()
+        if len(k) >= 32:
+            return k
+    except Exception:
+        pass
+    k = secrets.token_hex(32).encode()
+    try:
+        os.makedirs(settings.DATA_DIR, exist_ok=True)
+        with open(KEY_PATH, "wb") as f:
+            f.write(k)
+        os.chmod(KEY_PATH, 0o600)
+    except Exception:
+        pass
+    return k
+
+
+def _sign(exp, pwd):
+    # 密码参与签名：改了密码，所有旧 Cookie 立即失效
+    msg = ("%s:%s" % (exp, hashlib.sha256(pwd.encode()).hexdigest())).encode()
+    return hmac.new(_session_key(), msg, hashlib.sha256).hexdigest()[:40]
+
+
+def make_session():
+    exp = int(time.time()) + SESSION_DAYS * 86400
+    return "%d.%s" % (exp, _sign(exp, admin_password()))
+
+
+def check_session(tok):
+    pwd = admin_password()
+    if not tok or not pwd:
+        return False
+    try:
+        exp_s, sig = tok.split(".", 1)
+        exp = int(exp_s)
+    except Exception:
+        return False
+    if exp < time.time():
+        return False
+    return hmac.compare_digest(sig, _sign(exp_s, pwd))
 
 
 def _jwt(token):
@@ -108,18 +163,35 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     # ---------- 基础 ----------
+    def _cookie(self, name):
+        raw = self.headers.get("Cookie") or ""
+        for part in raw.split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == name:
+                return urllib.parse.unquote(v)
+        return ""
+
     def _authed(self):
         pwd = admin_password()
         if not pwd:
             return True
+        if check_session(self._cookie(SESSION_COOKIE)):
+            return True
+        # 兼容命令行 / 脚本里的 Basic（浏览器不会走到这里，页面用登录页）
         hdr = self.headers.get("Authorization", "")
         if hdr.startswith("Basic "):
             try:
                 _, passwd = base64.b64decode(hdr[6:]).decode().split(":", 1)
-                return passwd == pwd
+                return hmac.compare_digest(passwd, pwd)
             except Exception:
                 return False
         return False
+
+    def _deny(self):
+        """页面请求跳登录页，接口请求回 401 JSON（不弹浏览器原生对话框）。"""
+        if urllib.parse.urlparse(self.path).path.startswith("/api/"):
+            return self._json({"error": "未登录或登录已过期", "login": True}, 401)
+        return self._send(302, "", "text/plain; charset=utf-8", {"Location": "/login"})
 
     def _send(self, code, body, ctype="application/json; charset=utf-8", extra=None):
         data = body.encode("utf-8") if isinstance(body, str) else body
@@ -132,8 +204,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _json(self, obj, code=200):
-        self._send(code, json.dumps(obj, ensure_ascii=False))
+    def _json(self, obj, code=200, extra=None):
+        self._send(code, json.dumps(obj, ensure_ascii=False), extra=extra)
 
     def _body(self):
         n = int(self.headers.get("Content-Length") or 0)
@@ -146,19 +218,24 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---------- 路由 ----------
     def do_GET(self):
-        if not self._authed():
-            return self._send(401, "unauthorized", "text/plain; charset=utf-8",
-                              {"WWW-Authenticate": 'Basic realm="Buddy"'})
         u = urllib.parse.urlparse(self.path)
         path = u.path
+        if path == "/login":
+            if not admin_password():
+                return self._send(302, "", "text/plain; charset=utf-8", {"Location": "/"})
+            return self._login_page()
+        if path == "/api/health":
+            return self._json({"ok": True, "time": datetime.datetime.now().isoformat()})
+        if path == "/favicon.ico":
+            return self._send(204, b"", "image/x-icon")
+        if not self._authed():
+            return self._deny()
         if path in ("/", "/index.html"):
             p = os.path.join(WEB_DIR, "index.html")
             if not os.path.exists(p):
                 return self._send(404, "web/index.html 不存在", "text/plain; charset=utf-8")
             with open(p, "rb") as f:
                 return self._send(200, f.read(), "text/html; charset=utf-8")
-        if path == "/api/health":
-            return self._json({"ok": True, "time": datetime.datetime.now().isoformat()})
         if path == "/api/accounts":
             return self._json({"accounts": [_profile(a) for a in accounts.list_accounts()]})
         if path == "/api/settings":
@@ -179,10 +256,13 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"error": "not found"}, 404)
 
     def do_POST(self):
-        if not self._authed():
-            return self._send(401, "unauthorized", "text/plain; charset=utf-8",
-                              {"WWW-Authenticate": 'Basic realm="Buddy"'})
         path = urllib.parse.urlparse(self.path).path
+        if path == "/api/login":
+            return self._login()
+        if path == "/api/logout":
+            return self._logout()
+        if not self._authed():
+            return self._deny()
         if path == "/api/accounts":
             return self._create()
         if path == "/api/settings":
@@ -201,7 +281,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_PATCH(self):
         if not self._authed():
-            return self._send(401, "unauthorized", "text/plain; charset=utf-8")
+            return self._deny()
         m = re.match(r"^/api/accounts/([^/]+)$", urllib.parse.urlparse(self.path).path)
         if not m:
             return self._json({"error": "not found"}, 404)
@@ -216,7 +296,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         if not self._authed():
-            return self._send(401, "unauthorized", "text/plain; charset=utf-8")
+            return self._deny()
         m = re.match(r"^/api/accounts/([^/]+)$", urllib.parse.urlparse(self.path).path)
         if not m:
             return self._json({"error": "not found"}, 404)
@@ -224,6 +304,34 @@ class Handler(BaseHTTPRequestHandler):
         if not accounts.delete_account(aid):
             return self._json({"error": "账号不存在"}, 404)
         return self._json({"ok": True})
+
+    # ---------- 登录 ----------
+    def _login_page(self, err="", code=200):
+        p = os.path.join(WEB_DIR, "login.html")
+        if not os.path.exists(p):
+            return self._send(404, "web/login.html 不存在", "text/plain; charset=utf-8")
+        with open(p, encoding="utf-8") as f:
+            html = f.read().replace("{{ERR}}", err).replace("{{SHOW_ERR}}", "block" if err else "none")
+        return self._send(code, html, "text/html; charset=utf-8")
+
+    def _login(self):
+        pwd = admin_password()
+        if not pwd:
+            return self._json({"ok": True, "no_password": True})
+        given = (self._body().get("password") or "").strip()
+        if not given:
+            return self._login_page("请输入密码", 200)
+        if not hmac.compare_digest(given.encode(), pwd.encode()):
+            time.sleep(0.6)  # 简单拖慢暴力尝试
+            return self._login_page("密码不正确", 200)
+        ck = "%s=%s; Path=/; HttpOnly; SameSite=Lax; Max-Age=%d" % (
+            SESSION_COOKIE, make_session(), SESSION_DAYS * 86400)
+        return self._json({"ok": True}, extra={"Set-Cookie": ck})
+
+    def _logout(self):
+        return self._json({"ok": True},
+                          extra={"Set-Cookie": "%s=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"
+                                               % SESSION_COOKIE})
 
     def _create(self):
         body = self._body()
