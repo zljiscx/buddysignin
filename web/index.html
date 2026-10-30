@@ -230,12 +230,12 @@ async function openSettings(){
   try{
     const d = await api('/api/settings');
     $('#setHook').value = d.webhook || '';
-    setMsg(d.webhook_configured ? '当前：已配置，每天结果会推送到群里' : '当前：未配置，不推送', '#697078');
+    setHookMsg(d.webhook_configured ? '当前：已配置，每天结果会推送到群里' : '当前：未配置，不推送', '#697078');
     setDlg.showModal();
   }catch(e){ toast('读取失败：' + e.message); }
 }
 
-function setMsg(text, color){
+function setHookMsg(text, color){
   const el = $('#setMsg'); el.textContent = text; el.style.color = color || '#697078';
 }
 
@@ -243,11 +243,11 @@ async function saveSettings(){
   $('#setBtn').disabled = true;
   try{
     const r = await api('/api/settings', {method:'POST', body: JSON.stringify({webhook: $('#setHook').value.trim()})});
-    setMsg(r.webhook_configured ? '已保存，之后每天结果会推送到这个群' : '已保存，推送已关闭', '#137333');
+    setHookMsg(r.webhook_configured ? '已保存，之后每天结果会推送到这个群' : '已保存，推送已关闭', '#137333');
     toast('已保存');
     return true;
   }catch(e){
-    setMsg(e.message, '#b3261e');
+    setHookMsg(e.message, '#b3261e');
     return false;
   }finally{ $('#setBtn').disabled = false; }
 }
@@ -256,11 +256,11 @@ async function testPush(){
   $('#testBtn').disabled = true;
   try{
     if(!await saveSettings()) return;
-    setMsg('发送中…', '#697078');
+    setHookMsg('发送中…', '#697078');
     const r = await api('/api/settings/test', {method:'POST'});
-    if(r.ok) setMsg('测试消息已推送，请查看群消息', '#137333');
-    else setMsg('推送失败：' + (r.message || ('HTTP ' + r.status)), '#b3261e');
-  }catch(e){ setMsg('推送失败：' + e.message, '#b3261e'); }
+    if(r.ok) setHookMsg('测试消息已推送，请查看群消息', '#137333');
+    else setHookMsg('推送失败：' + (r.message || ('HTTP ' + r.status)), '#b3261e');
+  }catch(e){ setHookMsg('推送失败：' + e.message, '#b3261e'); }
   finally{ $('#testBtn').disabled = false; }
 }
 </script>
