@@ -51,14 +51,39 @@ docker compose up -d
 | GHCR | `ghcr.io/zljiscx/buddysignin` | 默认，已公开，免登录可拉 |
 | Docker Hub | `zljiscx/buddysignin` | 需先配下面两个 secret，配了就会一起推 |
 
-要用 Docker Hub，在仓库 **Settings → Secrets and variables → Actions** 加：
+没配 Docker Hub 的 secret 时，CI 只推 GHCR，不会失败——不想折腾可以跳过这一节。
 
-| Secret | 值 |
-|---|---|
-| `DOCKERHUB_USERNAME` | Docker Hub 用户名 |
-| `DOCKERHUB_TOKEN` | Docker Hub → Account Settings → Personal access tokens 生成的 token |
+### 用 Docker Hub 发布（可选，三步）
 
-没配这两个 secret 时，CI 只推 GHCR，不会失败。配好之后把 `.env` 的 `BUDDY_IMAGE` 换成 `zljiscx/buddysignin:latest` 即可。
+**① 在 Docker Hub 生成 access token**
+
+1. 登录 <https://hub.docker.com>，右上角头像 → **Account settings**（直达 <https://hub.docker.com/settings/security>）
+2. 左侧 **Personal access tokens** → **Generate new token**
+3. Token name 填 `github-actions-buddysignin`；Access permissions 至少勾 **Read** + **Write**（想删旧镜像再加 Delete）
+4. 点 **Generate** → 立刻复制这串 token（**只显示一次**，关掉就再也看不到）
+
+**② 加到 GitHub 仓库的 secrets**
+
+直达：<https://github.com/zljiscx/buddysignin/settings/secrets/actions>
+
+如果手点：仓库首页顶部 **Settings** 标签 → 左侧 **Secrets and variables** → **Actions**。
+注意是**仓库**的 Settings；右上角头像里的 Settings 是个人设置，里面没有这一项。
+
+1. 点右上 **New repository secret**
+2. Name 填 `DOCKERHUB_USERNAME`，Secret 填你的 Docker Hub **用户名**（不是邮箱、不是昵称）
+3. 再点 **New repository secret**，Name 填 `DOCKERHUB_TOKEN`，Secret 填 ① 复制的 token
+4. 加完列表里应正好有这两个名字（大小写要一致）
+
+**③ 触发构建**
+
+Actions → build-and-push → **Run workflow**（或随便 push 一次）。成功后镜像地址为 `<你的DockerHub用户名>/buddysignin:latest`。
+之后把 `.env` 的 `BUDDY_IMAGE` 改成这个地址即可。
+
+常见坑：
+
+- 首次推送会自动建仓库；若报 `denied`/`unauthorized`，先去 <https://hub.docker.com/repository/create> 手动建一个 **Public** 的 `buddysignin` 再跑
+- Docker Hub 用户名和 GitHub 用户名不同没关系，CI 用 secret 里的用户名拼镜像名
+- token 只需 **Write** 权限，不用给 Admin
 
 手动发版：
 
