@@ -44,16 +44,37 @@
   textarea,input[type=text],input[type=password]{width:100%}
   input[type=time]{padding:8px 10px;width:150px;font-family:ui-monospace,Menlo,monospace;cursor:pointer}
   input:focus,textarea:focus{outline:none;border-color:#1664ff;box-shadow:0 0 0 3px rgba(22,100,255,.12)}
-  .time-add{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-  .time-list{margin-top:10px;border:1px solid #e6e8eb;border-radius:8px;overflow:hidden}
-  .time-item{display:flex;align-items:center;justify-content:space-between;gap:10px;
-             padding:8px 12px;border-bottom:1px solid #f1f3f5;background:#fafbfc}
-  .time-item:last-child{border-bottom:none}
-  .time-item .tt{font-family:ui-monospace,Menlo,monospace;font-size:14px;font-weight:500}
-  .time-item .idx{color:#b0b6bd;font-size:12px;margin-right:7px;font-weight:400}
-  .time-ops{display:flex;gap:6px}
-  .time-ops .btn{padding:4px 11px;font-size:12px}
-  .time-empty{padding:14px 12px;color:#9aa0a6;font-size:13px;text-align:center}
+  /* 时间点：左列表 + 右输入框与四键 */
+  .slot-row{display:flex;gap:12px;align-items:flex-start;margin-top:6px}
+  .slot-list{flex:1;min-width:0;max-height:172px;overflow-y:auto;background:#fff;
+             border:1px solid #e3e6ea;border-radius:6px}
+  .slot-item{display:flex;align-items:center;justify-content:space-between;gap:10px;
+             padding:11px 14px;border-bottom:1px solid #f0f2f4;cursor:pointer;
+             font-size:15px;font-family:ui-monospace,Menlo,monospace;transition:background .12s}
+  .slot-item:last-child{border-bottom:none}
+  .slot-list::-webkit-scrollbar{width:8px}
+  .slot-list::-webkit-scrollbar-thumb{background:#cfd4da;border-radius:4px}
+  .slot-list::-webkit-scrollbar-track{background:#f7f8fa}
+  .slot-item:hover{background:#f7f9fb}
+  .slot-item.active{background:#eaf3fe}
+  .slot-item .st{font-size:13px;color:#3aa757;font-family:inherit}
+  .slot-item.off .tt{color:#a0a6ad}
+  .slot-item.off .st{color:#a0a6ad}
+  .slot-empty{padding:26px 12px;color:#9aa0a6;font-size:13px;text-align:center}
+  .slot-side{flex:0 0 186px;width:186px}
+  .slot-side input[type=time]{width:100%;height:44px;font-size:16px;text-align:center;border-radius:6px}
+  .slot-btns{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+  .sbtn{height:40px;border-radius:6px;border:1px solid #d9dde3;background:#fff;color:#1f2329;
+        font-size:14px;cursor:pointer;transition:.12s}
+  .sbtn:hover{background:#f5f7fa}
+  .sbtn.add{background:#2f80ed;border-color:#2f80ed;color:#fff;font-weight:500}
+  .sbtn.add:hover{background:#2571d6}
+  .sbtn.edit{color:#2f80ed;border-color:#9dc0f2}
+  .sbtn.edit:hover{background:#f2f7fe}
+  .sbtn.del{color:#e34d43;border-color:#f0c2be}
+  .sbtn.del:hover{background:#fff4f3}
+  .sbtn:disabled{color:#c4c8cc;border-color:#e9ebee;background:#fafbfc;cursor:not-allowed}
+  @media(max-width:640px){.slot-row{flex-direction:column}.slot-side{width:100%;flex:1 1 auto}}
   textarea{min-height:96px;resize:vertical;font-family:ui-monospace,Menlo,monospace}
   label{display:block;font-size:12px;color:#697078;margin:12px 0 6px}
   .empty{text-align:center;color:#9aa0a6;padding:48px 0}
@@ -103,16 +124,24 @@
   <div class="dlg-head"><strong>设置</strong><button class="btn" onclick="setDlg.close()">关闭</button></div>
   <div class="dlg-body">
     <label>每日自动执行时间点</label>
-    <div class="time-add">
-      <input type="time" id="timeInput" step="60">
-      <button class="btn primary" id="timeSubmitBtn" onclick="submitTime()">添加</button>
-      <button class="btn" id="timeCancelBtn" onclick="cancelEditTime()" style="display:none">取消修改</button>
+    <div class="slot-row">
+      <div class="slot-list" id="timeList"></div>
+      <div class="slot-side">
+        <input type="time" id="timeInput" step="60">
+        <div class="slot-btns">
+          <button class="sbtn add" onclick="addSlot()">增加</button>
+          <button class="sbtn edit" id="slotEditBtn" onclick="editSlot()">修改</button>
+          <button class="sbtn" id="slotToggleBtn" onclick="toggleSlot()">禁用</button>
+          <button class="sbtn del" id="slotDelBtn" onclick="delSlot()">删除</button>
+        </div>
+      </div>
     </div>
-    <div class="time-list" id="timeList"></div>
     <div class="sub" style="margin-top:8px;line-height:1.8">
-      增删改会立即保存并生效，不用再点底部按钮。每个时间点当天只触发一次，
-      已完成的步骤自动跳过，没做完的（对话 / 连登奖励 / 猫猫旅行）留到下一个时间点补做。<br>
-      常驻运行改完即时生效；用「定时启动」方式时，计划任务仍需按这些时间点触发。
+      先在左侧点选一行，再用右侧「修改 / 禁用 / 删除」；「增加」用输入框里的时间新建。
+      增删改立即保存并生效。每个时间点当天只触发一次，已完成的步骤自动跳过，
+      没做完的（对话 / 连登奖励 / 猫猫旅行）留到下一个时间点补做。<br>
+      禁用的时间点保留在列表里但不参与调度；常驻运行改完即时生效，用「定时启动」方式时
+      计划任务仍需按这些时间点触发。
     </div>
 
     <label>企业微信群机器人地址（留空 = 不推送）</label>
@@ -273,85 +302,113 @@ refresh();
 setInterval(refresh, 60000);
 
 // ---------- 设置：执行时间点 ----------
-let times = [];
-let editingIdx = -1;
+let slots = [];      // [{time:'08:10', enabled:true}]
+let sel = -1;        // 当前选中的行
 
-function renderTimes(){
+function renderSlots(){
   const box = $('#timeList');
-  if(!times.length){
-    box.innerHTML = '<div class="time-empty">还没有时间点，请至少添加一个</div>';
-    return;
+  if(!slots.length){
+    box.innerHTML = '<div class="slot-empty">还没有时间点，请至少添加一个</div>';
+  }else{
+    box.innerHTML = slots.map((s, i) => `
+      <div class="slot-item ${i === sel ? 'active' : ''} ${s.enabled ? '' : 'off'}"
+           onclick="selectSlot(${i})">
+        <span class="tt">${esc(s.time)}</span>
+        <span class="st">${s.enabled ? '启用' : '禁用'}</span>
+      </div>`).join('');
+    const cur = box.querySelector('.slot-item.active');
+    if(cur) cur.scrollIntoView({block:'nearest'});
   }
-  box.innerHTML = times.map((t, i) => `
-    <div class="time-item">
-      <div class="tt"><span class="idx">${i + 1}.</span>${esc(t)}</div>
-      <div class="time-ops">
-        <button class="btn" onclick="editTime(${i})">修改</button>
-        <button class="btn danger" onclick="delTime(${i})">删除</button>
-      </div>
-    </div>`).join('');
+  syncSide();
 }
 
-function editTime(i){
-  editingIdx = i;
-  $('#timeInput').value = times[i];
-  $('#timeSubmitBtn').textContent = '保存修改';
-  $('#timeCancelBtn').style.display = '';
-  $('#timeInput').focus();
+function syncSide(){
+  const s = slots[sel];
+  $('#slotEditBtn').disabled = !s;
+  $('#slotToggleBtn').disabled = !s;
+  $('#slotDelBtn').disabled = !s;
+  $('#slotToggleBtn').textContent = s && !s.enabled ? '启用' : '禁用';
+  if(s) $('#timeInput').value = s.time;
 }
 
-function cancelEditTime(){
-  editingIdx = -1;
-  $('#timeInput').value = '';
-  $('#timeSubmitBtn').textContent = '添加';
-  $('#timeCancelBtn').style.display = 'none';
+function selectSlot(i){
+  sel = i;
+  renderSlots();
 }
 
-async function pushTimes(prev){
+function readInput(){
+  const raw = ($('#timeInput').value || '').trim();
+  const m = /^(\d{1,2}):(\d{2})$/.exec(raw);
+  if(!m){ toast('请先选择时间'); return ''; }
+  const h = +m[1], mm = +m[2];
+  if(h > 23 || mm > 59){ toast('时间不合法'); return ''; }
+  return `${String(h).padStart(2, '0')}:${m[2]}`;
+}
+
+async function saveSlots(prev, okMsg){
+  renderSlots();
   try{
-    const r = await api('/api/settings', {method:'POST', body: JSON.stringify({times})});
-    times = r.times || times;
-    renderTimes();
-    setHookMsg(`时间点已生效 · 下次执行 ${r.next_run || '—'}`, '#137333');
+    const r = await api('/api/settings', {method:'POST', body: JSON.stringify({slots})});
+    if(Array.isArray(r.slots)){
+      slots = r.slots;
+      if(sel >= slots.length) sel = slots.length - 1;
+    }
+    renderSlots();
+    const on = slots.filter(s => s.enabled).length;
+    setHookMsg(on ? `已生效 · 下次执行 ${r.next_run || '—'}`
+                  : '注意：所有时间点都已禁用，不会再自动执行', on ? '#137333' : '#b06000');
     refresh();
+    if(okMsg) toast(okMsg);
     return true;
   }catch(e){
-    if(prev){ times = prev.slice(); renderTimes(); }
+    if(prev){ slots = prev.slice(); renderSlots(); }
     setHookMsg(e.message, '#b3261e');
     toast(e.message);
     return false;
   }
 }
 
-async function submitTime(){
-  const raw = ($('#timeInput').value || '').trim();
-  if(!/^\d{1,2}:\d{2}$/.test(raw)) return toast('请先选择时间');
-  const [hh, mm] = raw.split(':');
-  const norm = `${hh.padStart(2, '0')}:${mm}`;
-  if(+hh > 23 || +mm > 59) return toast('时间不合法');
-
-  const wasEdit = editingIdx >= 0;
-  if(times.some((t, i) => t === norm && i !== editingIdx)) return toast(`${norm} 已存在`);
-  if(!wasEdit && times.length >= 12) return toast('最多 12 个时间点');
-
-  const prev = times.slice();
-  if(wasEdit) times[editingIdx] = norm;
-  else times.push(norm);
-  times.sort();
-  cancelEditTime();
-  renderTimes();
-  if(await pushTimes(prev)) toast(wasEdit ? `已改为 ${norm}` : `已添加 ${norm}`);
+async function addSlot(){
+  const t = readInput();
+  if(!t) return;
+  if(slots.some(s => s.time === t)) return toast(`${t} 已存在`);
+  if(slots.length >= 12) return toast('最多 12 个时间点');
+  const prev = slots.map(s => ({...s}));
+  slots.push({time: t, enabled: true});
+  slots.sort((a, b) => a.time.localeCompare(b.time));
+  sel = slots.findIndex(s => s.time === t);
+  if(await saveSlots(prev, `已增加 ${t}`)) $('#timeInput').value = '';
 }
 
-async function delTime(i){
-  if(times.length <= 1) return toast('至少保留一个时间点');
-  const prev = times.slice();
-  const gone = times[i];
-  times.splice(i, 1);
-  if(editingIdx === i) cancelEditTime();
-  else if(editingIdx > i) editingIdx -= 1;
-  renderTimes();
-  if(await pushTimes(prev)) toast(`已删除 ${gone}`);
+async function editSlot(){
+  if(sel < 0) return toast('请先在左侧选一个时间点');
+  const t = readInput();
+  if(!t) return;
+  if(slots.some((s, i) => i !== sel && s.time === t)) return toast(`${t} 已存在`);
+  if(t === slots[sel].time) return toast('时间没有变化');
+  const prev = slots.map(s => ({...s}));
+  slots[sel].time = t;
+  slots.sort((a, b) => a.time.localeCompare(b.time));
+  sel = slots.findIndex(s => s.time === t);
+  await saveSlots(prev, `已改为 ${t}`);
+}
+
+async function toggleSlot(){
+  if(sel < 0) return toast('请先在左侧选一个时间点');
+  const prev = slots.map(s => ({...s}));
+  slots[sel].enabled = !slots[sel].enabled;
+  const word = slots[sel].enabled ? '启用' : '禁用';
+  await saveSlots(prev, `已${word} ${slots[sel].time}`);
+}
+
+async function delSlot(){
+  if(sel < 0) return toast('请先在左侧选一个时间点');
+  if(slots.length <= 1) return toast('至少保留一个时间点');
+  const prev = slots.map(s => ({...s}));
+  const gone = slots[sel].time;
+  slots.splice(sel, 1);
+  if(sel >= slots.length) sel = slots.length - 1;
+  await saveSlots(prev, `已删除 ${gone}`);
 }
 
 // ---------- 设置 ----------
@@ -359,9 +416,10 @@ async function openSettings(){
   try{
     const d = await api('/api/settings');
     $('#setHook').value = d.webhook || '';
-    times = (d.times || []).slice();
-    cancelEditTime();
-    renderTimes();
+    slots = Array.isArray(d.slots) && d.slots.length ? d.slots.map(s => ({...s}))
+          : (d.times || []).map(t => ({time: t, enabled: true}));
+    sel = slots.length ? 0 : -1;
+    renderSlots();
     $('#setPwd').value = '';
     if(d.password_from_env){
       $('#setPwdHint').textContent = '当前密码由环境变量 BUDDY_ADMIN_PASSWORD 指定，这里填写不会生效。';

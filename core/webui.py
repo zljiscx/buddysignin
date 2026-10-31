@@ -246,7 +246,7 @@ class Handler(BaseHTTPRequestHandler):
             nr = settings.next_run()
             return self._json({
                 "accounts": [_profile(a) for a in accounts.list_accounts()],
-                "times": ["%02d:%02d" % t for t in settings.times()],
+                "times": settings.enabled_times(),
                 "next_run": nr.strftime("%m-%d %H:%M") if nr else "",
             })
         if path == "/api/settings":
@@ -255,7 +255,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({
                 "webhook": cur.get("webhook") or "",
                 "webhook_configured": bool(settings.webhook_url()),
-                "times": ["%02d:%02d" % t for t in settings.times()],
+                "times": settings.enabled_times(),
+                "slots": settings.slots(),
                 "password_default": password_is_default(),
                 "password_from_env": bool((os.environ.get("BUDDY_ADMIN_PASSWORD") or "").strip()),
                 "next_run": nr.strftime("%Y-%m-%d %H:%M") if nr else "",
@@ -381,24 +382,20 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": "机器人 key 看起来不完整"}, 400)
             out["webhook"] = raw
 
-        if "times" in body:
-            raw = body.get("times")
+        key = "slots" if "slots" in body else ("times" if "times" in body else "")
+        if key:
+            raw = body.get(key)
             items = raw if isinstance(raw, list) else str(raw or "").replace(",", "\n").splitlines()
             clean, bad = [], []
-            for t in items:
-                t = str(t).strip()
-                if not t:
-                    continue
-                try:
-                    hh, mm = t.split(":")
-                    h, m = int(hh), int(mm)
-                    assert 0 <= h < 24 and 0 <= m < 60
-                    clean.append("%02d:%02d" % (h, m))
-                except Exception:
-                    bad.append(t)
+            for it in items:
+                s = settings.norm_slot(it)
+                if s:
+                    clean.append(s)
+                elif str(it).strip():
+                    bad.append(str(it).strip())
             if bad:
                 return self._json({"error": "时间格式不对（应为 HH:MM）：%s" % "、".join(bad[:3])}, 400)
-            clean = sorted(set(clean))
+            clean = settings.norm_slots(clean)
             if not clean:
                 return self._json({"error": "至少保留一个时间点"}, 400)
             if len(clean) > 12:
@@ -426,7 +423,8 @@ class Handler(BaseHTTPRequestHandler):
             "ok": True,
             "webhook": cur.get("webhook", ""),
             "webhook_configured": bool(settings.webhook_url()),
-            "times": ["%02d:%02d" % t for t in settings.times()],
+            "times": settings.enabled_times(),
+            "slots": settings.slots(),
             "password_default": password_is_default(),
             "password_changed": changed_pwd,
             "next_run": nr.strftime("%Y-%m-%d %H:%M") if nr else "",

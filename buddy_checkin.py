@@ -157,9 +157,22 @@ def load_config(data_dir=None, overrides=None):
             # 管理台允许只填机器人 key，这里统一补成完整地址
             cfg["webhook"] = hook if "://" in hook else WEBHOOK_SEND + hook
             cfg["webhook_key"] = ""
-        # 管理台设置的自动执行时间点优先于配置文件
+        # 管理台设置的自动执行时间点优先于配置文件（支持 {"time","enabled"} 与纯字符串两种写法）
         if isinstance(st, dict) and isinstance(st.get("times"), list) and st["times"]:
-            cfg["times"] = [str(x).strip() for x in st["times"] if str(x).strip()]
+            picks, all_off = [], True
+            for x in st["times"]:
+                if isinstance(x, dict):
+                    if x.get("enabled") is False:
+                        continue
+                    t = str(x.get("time") or "").strip()
+                else:
+                    t = str(x or "").strip()
+                if t:
+                    picks.append(t)
+                    all_off = False
+            # 全部被禁用时明确置空，避免又回退到配置文件里的时间点
+            cfg["times"] = picks
+            cfg["_times_all_disabled"] = all_off
     except FileNotFoundError:
         pass
     except Exception as e:  # noqa
@@ -573,6 +586,8 @@ def append_status_summary(lines, status_info):
 
 def parse_times(cfg):
     """解析签到时间列表，返回排序去重后的 [(h, m), ...]；解析失败项忽略，空则回退 07:00。"""
+    if not cfg.get("times") and cfg.get("_times_all_disabled"):
+        return []
     raw = cfg.get("times") or ["07:00"]
     out = []
     for t in raw:
@@ -1263,6 +1278,9 @@ def run_daemon(cfg):
     """常驻守护：读取 times 里的签到时间，到时间执行签到，其余时间静默 sleep。
     当天签到成功后睡到次日第一个时间点；任一时间点签到失败则继续等待下一个兜底时间。"""
     times = parse_times(cfg)
+    if not times:
+        log(cfg, "所有时间点均已禁用，常驻调度不执行；退出（在管理台启用后重新启动）")
+        return
     tz = datetime.datetime.now().astimezone().tzinfo
     log(cfg, "DAEMON 启动 | 签到时间=%s | 时区=%s | restart=unless-stopped 即可长期保活" % (
         ", ".join("%02d:%02d" % t for t in times), tz))
