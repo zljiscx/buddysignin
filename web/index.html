@@ -39,7 +39,21 @@
   .dlg-head{padding:16px 18px;border-bottom:1px solid #eef0f2;display:flex;justify-content:space-between;align-items:center}
   .dlg-body{padding:16px 18px}
   pre{background:#0f1419;color:#d7dde3;padding:14px;border-radius:8px;font-size:12px;line-height:1.6;max-height:56vh;overflow:auto;white-space:pre-wrap;word-break:break-all}
-  textarea,input[type=text]{width:100%;border:1px solid #d9dde3;border-radius:6px;padding:9px 11px;font-size:13px;font-family:inherit}
+  textarea,input[type=text],input[type=password],input[type=time]{border:1px solid #d9dde3;border-radius:6px;
+         padding:9px 11px;font-size:13px;font-family:inherit;background:#fff;color:#1f2329}
+  textarea,input[type=text],input[type=password]{width:100%}
+  input[type=time]{padding:8px 10px;width:150px;font-family:ui-monospace,Menlo,monospace;cursor:pointer}
+  input:focus,textarea:focus{outline:none;border-color:#1664ff;box-shadow:0 0 0 3px rgba(22,100,255,.12)}
+  .time-add{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .time-list{margin-top:10px;border:1px solid #e6e8eb;border-radius:8px;overflow:hidden}
+  .time-item{display:flex;align-items:center;justify-content:space-between;gap:10px;
+             padding:8px 12px;border-bottom:1px solid #f1f3f5;background:#fafbfc}
+  .time-item:last-child{border-bottom:none}
+  .time-item .tt{font-family:ui-monospace,Menlo,monospace;font-size:14px;font-weight:500}
+  .time-item .idx{color:#b0b6bd;font-size:12px;margin-right:7px;font-weight:400}
+  .time-ops{display:flex;gap:6px}
+  .time-ops .btn{padding:4px 11px;font-size:12px}
+  .time-empty{padding:14px 12px;color:#9aa0a6;font-size:13px;text-align:center}
   textarea{min-height:96px;resize:vertical;font-family:ui-monospace,Menlo,monospace}
   label{display:block;font-size:12px;color:#697078;margin:12px 0 6px}
   .empty{text-align:center;color:#9aa0a6;padding:48px 0}
@@ -88,12 +102,17 @@
 <dialog id="setDlg">
   <div class="dlg-head"><strong>设置</strong><button class="btn" onclick="setDlg.close()">关闭</button></div>
   <div class="dlg-body">
-    <label>每日自动执行时间点（每行一个，24 小时制 HH:MM）</label>
-    <textarea id="setTimes" style="min-height:112px" placeholder="08:10&#10;12:40&#10;20:30"></textarea>
+    <label>每日自动执行时间点</label>
+    <div class="time-add">
+      <input type="time" id="timeInput" step="60">
+      <button class="btn primary" id="timeSubmitBtn" onclick="submitTime()">添加</button>
+      <button class="btn" id="timeCancelBtn" onclick="cancelEditTime()" style="display:none">取消修改</button>
+    </div>
+    <div class="time-list" id="timeList"></div>
     <div class="sub" style="margin-top:8px;line-height:1.8">
-      可填多个时间点，当天每个点先后兜底。签到达成后其余步骤会自动跳过，
-      没做完的（对话 / 连登奖励 / 猫猫旅行）在下一个时间点补做，不会重复刷接口。<br>
-      常驻运行即时生效；如果用「定时启动」方式，改完请让计划任务按这些时间点触发。
+      增删改会立即保存并生效，不用再点底部按钮。每个时间点当天只触发一次，
+      已完成的步骤自动跳过，没做完的（对话 / 连登奖励 / 猫猫旅行）留到下一个时间点补做。<br>
+      常驻运行改完即时生效；用「定时启动」方式时，计划任务仍需按这些时间点触发。
     </div>
 
     <label>企业微信群机器人地址（留空 = 不推送）</label>
@@ -109,7 +128,7 @@
     </div>
 
     <div style="margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-      <button class="btn primary" id="setBtn" onclick="saveSettings()">保存</button>
+      <button class="btn primary" id="setBtn" onclick="saveSettings()">保存推送与密码</button>
       <button class="btn" id="testBtn" onclick="testPush()">保存并测试推送</button>
       <span id="setMsg" style="font-size:13px;color:#697078"></span>
     </div>
@@ -253,12 +272,96 @@ async function doAdd(){
 refresh();
 setInterval(refresh, 60000);
 
+// ---------- 设置：执行时间点 ----------
+let times = [];
+let editingIdx = -1;
+
+function renderTimes(){
+  const box = $('#timeList');
+  if(!times.length){
+    box.innerHTML = '<div class="time-empty">还没有时间点，请至少添加一个</div>';
+    return;
+  }
+  box.innerHTML = times.map((t, i) => `
+    <div class="time-item">
+      <div class="tt"><span class="idx">${i + 1}.</span>${esc(t)}</div>
+      <div class="time-ops">
+        <button class="btn" onclick="editTime(${i})">修改</button>
+        <button class="btn danger" onclick="delTime(${i})">删除</button>
+      </div>
+    </div>`).join('');
+}
+
+function editTime(i){
+  editingIdx = i;
+  $('#timeInput').value = times[i];
+  $('#timeSubmitBtn').textContent = '保存修改';
+  $('#timeCancelBtn').style.display = '';
+  $('#timeInput').focus();
+}
+
+function cancelEditTime(){
+  editingIdx = -1;
+  $('#timeInput').value = '';
+  $('#timeSubmitBtn').textContent = '添加';
+  $('#timeCancelBtn').style.display = 'none';
+}
+
+async function pushTimes(prev){
+  try{
+    const r = await api('/api/settings', {method:'POST', body: JSON.stringify({times})});
+    times = r.times || times;
+    renderTimes();
+    setHookMsg(`时间点已生效 · 下次执行 ${r.next_run || '—'}`, '#137333');
+    refresh();
+    return true;
+  }catch(e){
+    if(prev){ times = prev.slice(); renderTimes(); }
+    setHookMsg(e.message, '#b3261e');
+    toast(e.message);
+    return false;
+  }
+}
+
+async function submitTime(){
+  const raw = ($('#timeInput').value || '').trim();
+  if(!/^\d{1,2}:\d{2}$/.test(raw)) return toast('请先选择时间');
+  const [hh, mm] = raw.split(':');
+  const norm = `${hh.padStart(2, '0')}:${mm}`;
+  if(+hh > 23 || +mm > 59) return toast('时间不合法');
+
+  const wasEdit = editingIdx >= 0;
+  if(times.some((t, i) => t === norm && i !== editingIdx)) return toast(`${norm} 已存在`);
+  if(!wasEdit && times.length >= 12) return toast('最多 12 个时间点');
+
+  const prev = times.slice();
+  if(wasEdit) times[editingIdx] = norm;
+  else times.push(norm);
+  times.sort();
+  cancelEditTime();
+  renderTimes();
+  if(await pushTimes(prev)) toast(wasEdit ? `已改为 ${norm}` : `已添加 ${norm}`);
+}
+
+async function delTime(i){
+  if(times.length <= 1) return toast('至少保留一个时间点');
+  const prev = times.slice();
+  const gone = times[i];
+  times.splice(i, 1);
+  if(editingIdx === i) cancelEditTime();
+  else if(editingIdx > i) editingIdx -= 1;
+  renderTimes();
+  if(await pushTimes(prev)) toast(`已删除 ${gone}`);
+}
+
 // ---------- 设置 ----------
 async function openSettings(){
   try{
     const d = await api('/api/settings');
     $('#setHook').value = d.webhook || '';
-    $('#setTimes').value = (d.times || []).join('\n');
+    times = (d.times || []).slice();
+    cancelEditTime();
+    renderTimes();
     $('#setPwd').value = '';
     if(d.password_from_env){
       $('#setPwdHint').textContent = '当前密码由环境变量 BUDDY_ADMIN_PASSWORD 指定，这里填写不会生效。';
@@ -279,10 +382,7 @@ function setHookMsg(text, color){
 async function saveSettings(){
   $('#setBtn').disabled = true; $('#testBtn').disabled = true;
   try{
-    const body = {
-      times: $('#setTimes').value.split('\n').map(s=>s.trim()).filter(Boolean),
-      webhook: $('#setHook').value.trim()
-    };
+    const body = { webhook: $('#setHook').value.trim() };
     const pwd = $('#setPwd').value;
     if(pwd) body.password = pwd;
     const r = await api('/api/settings', {method:'POST', body: JSON.stringify(body)});
