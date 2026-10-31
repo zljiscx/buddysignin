@@ -232,8 +232,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._login_page()
         if path == "/api/health":
             return self._json({"ok": True, "time": datetime.datetime.now().isoformat()})
-        if path == "/favicon.ico":
-            return self._send(204, b"", "image/x-icon")
+        if path in ("/favicon.ico", "/icon.png"):
+            return self._icon()
         if not self._authed():
             return self._deny()
         if path in ("/", "/index.html"):
@@ -323,6 +323,13 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"ok": True})
 
     # ---------- 登录 ----------
+    def _icon(self):
+        p = os.path.join(WEB_DIR, "icon.png")
+        if not os.path.exists(p):
+            return self._send(204, b"", "image/png")
+        with open(p, "rb") as f:
+            return self._send(200, f.read(), "image/png")
+
     def _login_page(self, err="", code=200):
         p = os.path.join(WEB_DIR, "login.html")
         if not os.path.exists(p):

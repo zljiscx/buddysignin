@@ -4,12 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>登录 · Buddy 签到管理台</title>
+<link rel="icon" type="image/png" href="/icon.png">
+<link rel="apple-touch-icon" href="/icon.png">
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:#f5f6f8;color:#1f2329;
        min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;font-size:14px}
   .box{background:#fff;border:1px solid #e6e8eb;border-radius:12px;padding:32px;width:min(360px,100%);
        box-shadow:0 6px 28px rgba(31,35,41,.06)}
+  .logo{width:44px;height:44px;border-radius:10px;display:block;margin-bottom:16px}
   h1{font-size:18px;font-weight:600;margin-bottom:6px}
   .sub{color:#8a9099;font-size:12px;margin-bottom:24px}
   label{display:block;font-size:12px;color:#697078;margin-bottom:6px}
@@ -29,6 +32,7 @@
 </head>
 <body>
 <form class="box" id="f" autocomplete="off">
+  <img class="logo" src="/icon.png" alt="">
   <h1>Buddy 签到管理台</h1>
   <div class="sub">输入管理密码继续</div>
   <div class="hint">{{HINT}}</div>

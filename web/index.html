@@ -4,12 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Buddy 签到管理台</title>
+<link rel="icon" type="image/png" href="/icon.png">
+<link rel="apple-touch-icon" href="/icon.png">
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:#f5f6f8;color:#1f2329;padding:24px;font-size:14px}
   .wrap{max-width:1080px;margin:0 auto}
   header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px}
   h1{font-size:20px;font-weight:600}
+  .brand{display:flex;align-items:center;gap:12px}
+  .brand img{width:34px;height:34px;border-radius:9px;flex:0 0 auto}
   .sub{color:#8a9099;font-size:12px;margin-top:4px}
   .btn{border:1px solid #d9dde3;background:#fff;color:#1f2329;padding:7px 14px;border-radius:6px;cursor:pointer;font-size:13px}
   .btn:hover{background:#f0f2f5}
@@ -81,15 +85,19 @@
   .fgroup h3{font-size:15px;font-weight:600;color:#1f2329;display:flex;align-items:center;gap:8px}
   .fgroup h3::before{content:'';width:3px;height:14px;border-radius:2px;background:#1664ff}
   .fdesc{font-size:12px;color:#8a9099;line-height:1.6;margin:6px 0 10px}
+  .fdesc code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:#f4f6f8;
+              padding:1px 5px;border-radius:4px;color:#4a5158}
   .fgroup input[type=text],.fgroup input[type=password]{height:40px}
   .ffoot{display:flex;gap:10px;align-items:center;flex-wrap:wrap;
          margin-top:18px;padding-top:16px;border-top:1px solid #eef0f3}
   .fmsg{font-size:13px;color:#697078}
+  .fmsg.bad{color:#b3261e}
   .dlg-head strong{font-size:16px}
   #setDlg{width:min(760px,92vw)}
   #setDlg .dlg-body{padding:18px 24px 20px}
+  #addDlg{width:min(620px,92vw)}
+  #addDlg .dlg-body{padding:18px 24px 20px}
   textarea{min-height:96px;resize:vertical;font-family:ui-monospace,Menlo,monospace}
-  label{display:block;font-size:12px;color:#697078;margin:12px 0 6px}
   .empty{text-align:center;color:#9aa0a6;padding:48px 0}
   .toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#1f2329;color:#fff;padding:10px 18px;border-radius:8px;font-size:13px;opacity:0;transition:.2s;z-index:99}
   .toast.show{opacity:1}
@@ -99,9 +107,12 @@
 <body>
 <div class="wrap">
   <header>
-    <div>
-      <h1>Buddy 签到管理台</h1>
-      <div class="sub" id="sub">加载中…</div>
+    <div class="brand">
+      <img src="/icon.png" alt="">
+      <div>
+        <h1>Buddy 签到管理台</h1>
+        <div class="sub" id="sub">加载中…</div>
+      </div>
     </div>
     <div class="row">
       <button class="btn" onclick="refresh()">刷新</button>
@@ -117,13 +128,22 @@
 <dialog id="addDlg">
   <div class="dlg-head"><strong>添加账号</strong><button class="btn" onclick="addDlg.close()">关闭</button></div>
   <div class="dlg-body">
-    <label>备注名称（可选）</label>
-    <input type="text" id="addName" placeholder="如：主号 / 工作号">
-    <label>Token 或 transfer code（在桌面端运行 buddy_auth.py 获取）</label>
-    <textarea id="addToken" placeholder="eyJhbGciOi... 或 buddy_auth 打印的一行 transfer code"></textarea>
-    <div style="margin-top:16px;display:flex;gap:10px">
+
+    <section class="fgroup">
+      <h3>备注名称</h3>
+      <p class="fdesc">可选，用来区分多个账号，例如「主号」「工作号」。</p>
+      <input type="text" id="addName" placeholder="主号">
+    </section>
+
+    <section class="fgroup">
+      <h3>Token 或 transfer code</h3>
+      <p class="fdesc">在已登录 WorkBuddy 的电脑上运行 <code>python buddy_auth.py</code>，把打印的那一行粘进来。</p>
+      <textarea id="addToken" placeholder="eyJhbGciOi... 或 buddy_auth 打印的一行 transfer code"></textarea>
+    </section>
+
+    <div class="ffoot">
       <button class="btn primary" id="addBtn" onclick="doAdd()">添加</button>
-      <span id="addMsg" style="color:#b3261e;font-size:13px;align-self:center"></span>
+      <span id="addMsg" class="fmsg bad"></span>
     </div>
   </div>
 </dialog>
