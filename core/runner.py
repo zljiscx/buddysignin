@@ -13,6 +13,7 @@ _lock = threading.Lock()
 _state_lock = threading.Lock()
 _last_run = {}          # account_id -> {time, ok, lines}
 _account_locks = {}
+_travel_next_try = {}   # account_id -> 下次允许自动领取的时间戳（失败后隔 5 分钟再试）
 
 
 def _alock(account_id):
@@ -80,6 +81,32 @@ def run_all(manual=False):
     return results
 
 
+def run_some(accs, manual=False):
+    results = {}
+    for a in accs:
+        results[a["id"]] = run_account(a, manual=manual)
+        time.sleep(1)
+    return results
+
+
+def travel_ready(now_ts=None):
+    """今日已派出、已过归来时间、还没领到积分的账号（与时间点无关，到点就领）。"""
+    now_ts = now_ts or time.time()
+    out = []
+    for a in accounts.list_accounts():
+        if not a.get("enabled", True):
+            continue
+        aid = a["id"]
+        if _travel_next_try.get(aid, 0) > now_ts:
+            continue
+        state = accounts.read_state(aid, "checkin_state.json")
+        at = bc.travel_due_at(state)
+        if at:
+            _travel_next_try[aid] = now_ts + 300
+            out.append((a, at))
+    return out
+
+
 def last_run(account_id=None):
     with _state_lock:
         if account_id:
@@ -131,9 +158,21 @@ def _tick(stop_event, log):
     slots = ["%02d:%02d" % t for t in scheduler_times()]
     hhmm = now.strftime("%H:%M")
     pending = [s for s in slots if s <= hhmm and s not in done]
+    ready = travel_ready()
+
+    if not pending and not ready:
+        stop_event.wait(30)     # 30 秒轮询：设置改动、系统时间漂移都能跟上
+        return
 
     if not pending:
-        stop_event.wait(30)     # 30 秒轮询：设置改动、系统时间漂移都能跟上
+        # 只为旅行归来而触发：只跑这些账号，不动时间点记录
+        log("[调度] 猫猫旅行已归来，立即领取：%s"
+            % "、".join("%s（%s）" % (a.get("name") or a["id"], bc._fmt_ts(at))
+                        for a, at in ready))
+        try:
+            run_some([a for a, _ in ready])
+        except Exception as e:
+            log("[调度] 领取异常：%s" % str(e)[:200])
         return
 
     label = "、".join(pending)

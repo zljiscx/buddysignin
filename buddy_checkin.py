@@ -1062,6 +1062,9 @@ def claim_growth_rewards(cfg, token, uid, domain):
 
 
 # ---- 成长计划：派猫猫旅行（每日 1 次，1~4 小时后回来自动领取）----
+TRAVEL_ARRIVED = ("arrived", "completed")   # 服务端归来后的状态名，实测为 arrived
+
+
 def travel_done_today(cfg):
     today = datetime.datetime.now().strftime("%Y-%m-%d")
     return load_checkin_state(cfg).get("travel_done_date") == today
@@ -1071,7 +1074,32 @@ def mark_travel_done(cfg):
     state = load_checkin_state(cfg)
     state["travel_done_date"] = datetime.datetime.now().strftime("%Y-%m-%d")
     state["travel_done_time"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    state.pop("travel_arrive_at", None)
     save_checkin_state(cfg, state)
+
+
+def mark_travel_departed(cfg, arrive_at):
+    """派出/在途时记下归来时刻，调度器据此到点触发领取。"""
+    state = load_checkin_state(cfg)
+    state["travel_departed_date"] = datetime.datetime.now().strftime("%Y-%m-%d")
+    if arrive_at:
+        state["travel_arrive_at"] = int(arrive_at)
+    save_checkin_state(cfg, state)
+
+
+def travel_due_at(state, now=None):
+    """今日已派出、还没领取、且已过归来时间 → 返回归来时间戳；否则 0。
+
+    调度器每轮用它对每个账号判断是否该立刻跑一轮领取。"""
+    today = (now or datetime.datetime.now()).strftime("%Y-%m-%d")
+    if state.get("travel_done_date") == today:
+        return 0
+    if state.get("travel_departed_date") != today:
+        return 0
+    at = int(state.get("travel_arrive_at") or 0)
+    if not at or time.time() < at:
+        return 0
+    return at
 
 
 def _fmt_ts(ts):
@@ -1081,9 +1109,10 @@ def _fmt_ts(ts):
         return "?"
 
 
-def do_travel(cfg, token, uid, domain):
-    """派猫猫旅行：已完成→领取，空闲且未达上限→派出，进行中→只记录。
-    返回 (ok, 结果行, 是否有实质动作)；ok=False 表示网络异常，下次兜底时间点重试。"""
+def do_travel(cfg, token, uid, domain, _depth=0):
+    """派猫猫旅行：已归来→领取积分，在途→记录归来时间，空闲且今日未派→派出。
+    返回 (ok, 结果行, 是否有实质动作)；ok=False 表示网络异常，下次兜底时间点重试。
+    _depth 只用于派出被 403 后复核状态再处理一次，避免无限重入。"""
     st, resp = _growth_call(cfg, "/buddy/travel/status", token, uid, domain)
     if st is None:
         return False, ["🐱 猫猫旅行：状态查询失败（网络不可达）"], False
@@ -1092,11 +1121,11 @@ def do_travel(cfg, token, uid, domain):
 
     state = _dig(resp, "state") or "idle"
     location = _dig(resp, "location") or {}
-    arrive_at = _dig(resp, "arrive_at") or 0
+    arrive_at = int(_dig(resp, "arrive_at") or 0)
     limit_reached = bool(_dig(resp, "daily_limit_reached"))
 
-    # 1) 已返回：领取积分
-    if state == "completed":
+    # 1) 已归来：领取积分（服务端状态为 arrived，兼容 completed）
+    if state in TRAVEL_ARRIVED:
         code, r = _growth_call(cfg, "/buddy/travel/claim", token, uid, domain, {})
         if code is not None and 200 <= code < 300:
             credit = _dig(r, "reward_credit") or _dig(r, "credit") or 0
@@ -1104,13 +1133,17 @@ def do_travel(cfg, token, uid, domain):
             mark_travel_done(cfg)
             return True, ["🐱 猫猫旅行：%s 归来，已领取 %s 积分" % (name, credit)], True
         if code == 403:
-            # 已被领过（多实例并发或人工领取），视为今日完成
-            mark_travel_done(cfg)
-            return True, [], False
+            # 已被领过（并发或人工领取）：状态复核后若已不在待领，才算完成
+            st2, resp2 = _growth_call(cfg, "/buddy/travel/status", token, uid, domain)
+            if st2 and 200 <= st2 < 300 and (_dig(resp2, "state") or "idle") not in TRAVEL_ARRIVED:
+                mark_travel_done(cfg)
+                return True, [], False
+            return False, ["🐱 猫猫旅行：领取被拒（HTTP 403 %s）" % (_dig(r, "msg") or "")], False
         return False, ["🐱 猫猫旅行：领取失败（HTTP %s %s）" % (code, _dig(r, "msg") or "")], False
 
-    # 2) 旅行中：记录预计归来时间，不重复派出
+    # 2) 在途：记下归来时刻，等调度器到点触发领取，不重复派出
     if state == "in_progress":
+        mark_travel_departed(cfg, arrive_at)
         return True, ["🐱 猫猫旅行：在途（预计 %s 归来）" % _fmt_ts(arrive_at)] if arrive_at else [], False
 
     # 3) 空闲且今日未达上限：派出
@@ -1127,15 +1160,17 @@ def do_travel(cfg, token, uid, domain):
                                {"location_id": loc_id})
         if code is not None and 200 <= code < 300:
             d = _dig(r, "location") or {}
+            mark_travel_departed(cfg, _dig(r, "arrive_at"))
             return True, ["🐱 猫猫旅行：已派往%s（%s 归来）"
                           % (d.get("name") or "旅行地", _fmt_ts(_dig(r, "arrive_at")))], True
         if code == 403:
-            # daily limit reached：今日名额已用尽
-            mark_travel_done(cfg)
-            return True, [], False
+            # 名额已用但可能仍有未领旅行：复核状态后按新状态再处理一次，别当成已完成
+            if _depth == 0:
+                return do_travel(cfg, token, uid, domain, _depth=1)
+            return False, ["🐱 猫猫旅行：派出被拒（HTTP 403）"], False
         return False, ["🐱 猫猫旅行：派出失败（HTTP %s %s）" % (code, _dig(r, "msg") or "")], False
 
-    # 4) 空闲且已达上限：今日已完成（可能已被人工派过并领完）
+    # 4) 既没名额也没有在途/待领任务：今日确实结束
     mark_travel_done(cfg)
     return True, [], False
 
@@ -1304,6 +1339,7 @@ def run_daemon(cfg):
         log(cfg, "WARN webhook 未配置，结果将不会推送到企业微信")
 
     last_claimed_date = None
+    travel_fired = 0          # 已因旅行归来唤醒过的 arrive_at，避免失败后反复唤醒
     while True:
         now = datetime.datetime.now()
         today_str = now.strftime("%Y-%m-%d")
@@ -1328,7 +1364,12 @@ def run_daemon(cfg):
             log(cfg, "WAIT 距下次签到 %s 还有 %.0f 秒（静默常驻）" % (target.strftime("%H:%M"), delta))
             # 分块 sleep，保持对时间与配置变化的响应；到点前 1 秒退出循环
             while (target - datetime.datetime.now()).total_seconds() > 1:
-                time.sleep(min(60, (target - datetime.datetime.now()).total_seconds()))
+                at = travel_due_at(load_checkin_state(cfg))
+                if at and at != travel_fired:
+                    travel_fired = at
+                    log(cfg, "WAKE 猫猫旅行已归来（%s），提前执行领取" % _fmt_ts(at))
+                    break
+                time.sleep(min(30, (target - datetime.datetime.now()).total_seconds()))
 
         # 到点尝试签到
         claimed = run_once(cfg)

@@ -467,7 +467,7 @@ function setHookMsg(text, color){
   const el = $('#setMsg'); el.textContent = text; el.style.color = color || '#697078';
 }
 
-async function saveSettings(){
+async function saveSettings(closeAfter = true){
   $('#setBtn').disabled = true; $('#testBtn').disabled = true;
   try{
     const body = { webhook: $('#setHook').value.trim() };
@@ -483,6 +483,7 @@ async function saveSettings(){
     setHookMsg(`${r.webhook_configured ? '推送：已配置' : '推送：未配置'} · 下次执行 ${r.next_run || '—'}`, '#137333');
     await refresh();
     toast('已保存');
+    if(closeAfter) setDlg.close();
     return true;
   }catch(e){
     setHookMsg(e.message, '#b3261e');
@@ -493,10 +494,10 @@ async function saveSettings(){
 async function testPush(){
   $('#testBtn').disabled = true;
   try{
-    if(!await saveSettings()) return;
+    if(!await saveSettings(false)) return;
     setHookMsg('发送中…', '#697078');
     const r = await api('/api/settings/test', {method:'POST'});
-    if(r.ok) setHookMsg('测试消息已推送，请查看群消息', '#137333');
+    if(r.ok){ setDlg.close(); toast('测试消息已推送，请查看群消息'); }
     else setHookMsg('推送失败：' + (r.message || ('HTTP ' + r.status)), '#b3261e');
   }catch(e){ setHookMsg('推送失败：' + e.message, '#b3261e'); }
   finally{ $('#testBtn').disabled = false; }
