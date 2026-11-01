@@ -1083,12 +1083,12 @@ def _fmt_ts(ts):
 
 def do_travel(cfg, token, uid, domain):
     """派猫猫旅行：已完成→领取，空闲且未达上限→派出，进行中→只记录。
-    返回 (ok, 结果行)；ok=False 表示网络异常，下次兜底时间点重试。"""
+    返回 (ok, 结果行, 是否有实质动作)；ok=False 表示网络异常，下次兜底时间点重试。"""
     st, resp = _growth_call(cfg, "/buddy/travel/status", token, uid, domain)
     if st is None:
-        return False, ["🐱 猫猫旅行：状态查询失败（网络不可达）"]
+        return False, ["🐱 猫猫旅行：状态查询失败（网络不可达）"], False
     if not (200 <= st < 300) or _dig(resp, "code") not in (None, 0):
-        return False, ["🐱 猫猫旅行：状态查询失败（HTTP %s %s）" % (st, _dig(resp, "msg") or "")]
+        return False, ["🐱 猫猫旅行：状态查询失败（HTTP %s %s）" % (st, _dig(resp, "msg") or "")], False
 
     state = _dig(resp, "state") or "idle"
     location = _dig(resp, "location") or {}
@@ -1102,16 +1102,16 @@ def do_travel(cfg, token, uid, domain):
             credit = _dig(r, "reward_credit") or _dig(r, "credit") or 0
             name = location.get("name") or "旅行地"
             mark_travel_done(cfg)
-            return True, ["🐱 猫猫旅行：%s 归来，已领取 %s 积分" % (name, credit)]
+            return True, ["🐱 猫猫旅行：%s 归来，已领取 %s 积分" % (name, credit)], True
         if code == 403:
             # 已被领过（多实例并发或人工领取），视为今日完成
             mark_travel_done(cfg)
-            return True, []
-        return False, ["🐱 猫猫旅行：领取失败（HTTP %s %s）" % (code, _dig(r, "msg") or "")]
+            return True, [], False
+        return False, ["🐱 猫猫旅行：领取失败（HTTP %s %s）" % (code, _dig(r, "msg") or "")], False
 
     # 2) 旅行中：记录预计归来时间，不重复派出
     if state == "in_progress":
-        return True, ["🐱 猫猫旅行：在途（预计 %s 归来）" % _fmt_ts(arrive_at)] if arrive_at else []
+        return True, ["🐱 猫猫旅行：在途（预计 %s 归来）" % _fmt_ts(arrive_at)] if arrive_at else [], False
 
     # 3) 空闲且今日未达上限：派出
     if not limit_reached:
@@ -1128,16 +1128,16 @@ def do_travel(cfg, token, uid, domain):
         if code is not None and 200 <= code < 300:
             d = _dig(r, "location") or {}
             return True, ["🐱 猫猫旅行：已派往%s（%s 归来）"
-                          % (d.get("name") or "旅行地", _fmt_ts(_dig(r, "arrive_at")))]
+                          % (d.get("name") or "旅行地", _fmt_ts(_dig(r, "arrive_at")))], True
         if code == 403:
             # daily limit reached：今日名额已用尽
             mark_travel_done(cfg)
-            return True, []
-        return False, ["🐱 猫猫旅行：派出失败（HTTP %s %s）" % (code, _dig(r, "msg") or "")]
+            return True, [], False
+        return False, ["🐱 猫猫旅行：派出失败（HTTP %s %s）" % (code, _dig(r, "msg") or "")], False
 
     # 4) 空闲且已达上限：今日已完成（可能已被人工派过并领完）
     mark_travel_done(cfg)
-    return True, []
+    return True, [], False
 
 
 def run_once(cfg):
@@ -1148,6 +1148,7 @@ def run_once(cfg):
     chat_on = bool(chat_cfg.get("enabled", True))
     growth_on = bool((cfg.get("growth") or {}).get("enabled", True))
     travel_on = bool((cfg.get("travel") or {}).get("enabled", True))
+    acted, failed = False, False   # 本轮是否有实质动作 / 是否有失败，决定要不要推送
 
     # 0) 当日已完成检查：签到、对话、连登奖励、猫猫旅行都完成才跳过；任一未完成则继续补做
     prev = load_checkin_state(cfg)
@@ -1195,6 +1196,8 @@ def run_once(cfg):
         claimed, result_lines, checkin_data = True, ["✅ 今日已签到"], {}
     else:
         claimed, result_lines, checkin_data = do_claim(cfg, token, uid, domain)
+        acted = claimed
+        failed = not claimed
 
     # 5) 签到后查询状态：签到前查会拿到旧值（连续天数/累计积分尚未 +1）
     if claimed and not signed_today:
@@ -1207,48 +1210,61 @@ def run_once(cfg):
         try:
             chat_ok, chat_line = do_chat(cfg, token, uid, nickname, domain, chat_cfg)
             result_lines.append(chat_line)
+            acted = acted or chat_ok
+            failed = failed or not chat_ok
         except Exception as e:
             log(cfg, "CHAT ERR %s" % e)
             result_lines.append("❌ 对话异常：%s" % str(e)[:120])
+            failed = True
 
     # 5.2) 成长计划连登奖励（7/14/28 天档）：可领取才领，服务端按档位幂等
     if growth_needed:
         try:
             growth_ok, growth_lines = claim_growth_rewards(cfg, token, uid, domain)
             result_lines.extend(growth_lines)
+            if growth_lines:               # 无档位可领时返回空行，不构成动作
+                acted = acted or growth_ok
+                failed = failed or not growth_ok
             # 查询成功即记为已检查；网络/服务端异常则留待下个兜底时间点重试
             if growth_ok:
                 mark_growth_checked(cfg)
         except Exception as e:
             log(cfg, "GROWTH ERR %s" % e)
             result_lines.append("🎁 连登奖励异常：%s" % str(e)[:120])
+            failed = True
 
     # 5.3) 派猫猫旅行：空闲则派出，已返回则领取，在途只记录
     if travel_needed:
         try:
-            travel_ok, travel_lines = do_travel(cfg, token, uid, domain)
+            travel_ok, travel_lines, travel_acted = do_travel(cfg, token, uid, domain)
             result_lines.extend(travel_lines)
+            acted = acted or travel_acted
+            failed = failed or not travel_ok
         except Exception as e:
             log(cfg, "TRAVEL ERR %s" % e)
             result_lines.append("🐱 猫猫旅行异常：%s" % str(e)[:120])
+            failed = True
 
-    # 6) 组装企业微信纯文本消息
-    md = "⛽ Buddy加油站 每日签到\n"
-    md += "日期：%s\n" % today
-    label = cfg.get("account_name") or nickname
-    if label:
-        md += "账号：%s\n" % label
-    elif nickname:
-        md += "账号：%s\n" % nickname
-    if refresh_note:
-        md += "%s\n" % refresh_note
-    md += "\n" + "\n".join(result_lines) + "\n"
-
-    status, body = push_wecom(cfg, md)
-    if status is None:
-        log(cfg, "RESULT: %s | wecom=None 原因=%s" % (" | ".join(result_lines), body))
+    # 6) 组装企业微信纯文本消息：只有真正做成了事或出错才推，幂等跳过的一律不推
+    if not (acted or failed):
+        log(cfg, "RESULT: %s | 本轮无新增动作，不推送" % (" | ".join(result_lines) or "无"))
     else:
-        log(cfg, "RESULT: %s | wecom=%s" % (" | ".join(result_lines), status))
+        md = "⛽ Buddy加油站 每日签到\n"
+        md += "日期：%s\n" % today
+        label = cfg.get("account_name") or nickname
+        if label:
+            md += "账号：%s\n" % label
+        elif nickname:
+            md += "账号：%s\n" % nickname
+        if refresh_note:
+            md += "%s\n" % refresh_note
+        md += "\n" + "\n".join(result_lines) + "\n"
+
+        status, body = push_wecom(cfg, md)
+        if status is None:
+            log(cfg, "RESULT: %s | wecom=None 原因=%s" % (" | ".join(result_lines), body))
+        else:
+            log(cfg, "RESULT: %s | wecom=%s" % (" | ".join(result_lines), status))
 
     # 7) 写入当日签到成功记录（仅签到成功时写；失败不写以便稍后重试）
     #    合并写入，避免覆盖同文件里的 growth_checked_date 等当日标记
